@@ -11,10 +11,10 @@ QUICK HEADS UP:
 To use this scipt and make it work, you need to create a LocalScript in game.StarterGui!
 
 ]]--
+
 local player = game.Players.LocalPlayer
 
 local valuesToSort = {17, 3, 12, 8, 5, 20, 10, 1, 18, 7, 14, 2, 16, 11, 9, 15, 4, 19, 6, 13} -- write your values here, NOTE
-local players = game:GetService("Players")
 
 local debounce = true
 
@@ -179,6 +179,20 @@ local uiCorner1 = Instance.new("UICorner")
 uiCorner1.Parent = mainFrame
 
 uiCorner1.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local noteLabel = Instance.new("TextLabel")
+noteLabel.Parent = mainFrame
+noteLabel.Name = "Important note frame"
+
+noteLabel.Text = "IMPORTANT: Click F9 for a dev console, to see how your values got sorted!"
+noteLabel.TextColor3 = color3
+noteLabel.TextScaled = true
+noteLabel.Size = UDim2.fromScale(1, 0.1)
+noteLabel.Position = UDim2.fromScale(0, -0.1)
+noteLabel.BackgroundColor3 = color2
+noteLabel.BackgroundTransparency = 0.1
 
 
 
@@ -471,6 +485,7 @@ end)
 
 bubbleSortButton.MouseButton1Click:Connect(function()
 	if #valuesToSort > 0 then
+		print("-----===== Bubble Sort =====-----")
 		local result = BubbleSort(valuesToSort)
 		resultsLabel.Text = result
 	end
@@ -478,6 +493,7 @@ end)
 
 selectionSortButton.MouseButton1Click:Connect(function()
 	if #valuesToSort > 0 then
+		print("-----===== Selection Sort =====-----")
 		local result = SelectionSort(valuesToSort)
 		resultsLabel.Text = result
 	end
@@ -485,6 +501,7 @@ end)
 
 insertionSortButton.MouseButton1Click:Connect(function()
 	if #valuesToSort > 0 then
+		print("-----===== Insertion Sort =====-----")
 		local result = InsertionSort(valuesToSort)
 		resultsLabel.Text = result
 	end
@@ -492,6 +509,7 @@ end)
 
 mergeSortButton.MouseButton1Click:Connect(function()
 	if #valuesToSort > 0 then
+		print("-----===== Merge Sort =====-----")
 		local result = MergeSort(valuesToSort)
 		resultsLabel.Text = table.concat(result, ", ")
 	end
@@ -499,6 +517,7 @@ end)
 
 quickSortButton.MouseButton1Click:Connect(function()
 	if #valuesToSort > 0 then
+		print("-----===== Quick Sort =====-----")
 		local result = QuickSort(valuesToSort)
 		resultsLabel.Text = table.concat(result, ", ")
 	end
