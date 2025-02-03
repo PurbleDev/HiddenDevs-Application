@@ -1,0 +1,505 @@
+--[[
+
+Originally made by Purble_Dev
+Discord: @purbledev
+Date: 03.02.2025
+
+Enjoy!
+
+
+QUICK HEADS UP:
+To use this scipt and make it work, you need to create a LocalScript in game.StarterGui!
+
+]]--
+local player = game.Players.LocalPlayer
+
+local valuesToSort = {17, 3, 12, 8, 5, 20, 10, 1, 18, 7, 14, 2, 16, 11, 9, 15, 4, 19, 6, 13} -- write your values here, NOTE
+local players = game:GetService("Players")
+
+local debounce = true
+
+
+-- SORTING FUNCTIONS
+
+function BubbleSort(arr) -- BUBBLE SORT
+	local n = #arr
+	for i = 1, n do
+		for j = 1, n - i do
+			if arr[j] > arr[j + 1] then
+				arr[j], arr[j + 1] = arr[j + 1], arr[j]
+				print(table.concat(arr, ", "))
+			end
+		end
+	end
+	return table.concat(arr, ", ")
+end
+
+function SelectionSort(arr) -- SELECTION SORT
+	local n = #arr
+	for i = 1, n do
+		local min_idx = i
+		for j = i + 1, n do
+			if arr[j] < arr[min_idx] then
+				min_idx = j
+			end
+		end
+		arr[i], arr[min_idx] = arr[min_idx], arr[i]
+		print(table.concat(arr, ", "))
+	end
+	return table.concat(arr, ", ")
+end
+
+function InsertionSort(arr) -- INSERTION SORT
+	local n = #arr
+	for i = 2, n do
+		local key = arr[i]
+		local j = i - 1
+		while j >= 1 and arr[j] > key do
+			arr[j + 1] = arr[j]
+			j = j - 1
+		end
+		arr[j + 1] = key
+		print(table.concat(arr, ", "))
+	end
+	return table.concat(arr, ", ")
+end
+
+function Merge(left, right) -- MERGE SORT
+	local result = {}
+	local i, j = 1, 1
+
+
+	while i <= #left and j <= #right do
+		if left[i] < right[j] then
+			table.insert(result, left[i])
+			i = i + 1
+		else
+			table.insert(result, right[j])
+			j = j + 1
+		end
+	end
+
+	while i <= #left do
+		table.insert(result, left[i])
+		i = i + 1
+	end
+
+	while j <= #right do
+		table.insert(result, right[j])
+		j = j + 1
+	end
+	print(table.concat(result, ", "))
+
+	return result
+end
+
+function MergeSort(arr)
+	if #arr <= 1 then
+		return arr
+	end
+	local mid = math.floor(#arr / 2)
+	local left = MergeSort({table.unpack(arr, 1, mid)})
+	local right = MergeSort({table.unpack(arr, mid + 1, #arr)})
+	return Merge(left, right)
+end
+
+function QuickSort(arr) -- QUICK SORT
+	if #arr <= 1 then
+		return arr
+	end
+
+	local pivot = arr[math.floor(#arr / 2)]
+	local left = {}
+	local right = {}
+	local middle = {}
+
+	for i = 1, #arr do
+		if arr[i] < pivot then
+			table.insert(left, arr[i])
+		elseif arr[i] > pivot then
+			table.insert(right, arr[i])
+		else
+			table.insert(middle, arr[i])
+		end
+	end
+
+	left = QuickSort(left)
+	right = QuickSort(right)
+
+	return Concat(left, middle, right)
+end
+
+function Concat(left, middle, right)
+	local result = {}
+
+	for _, v in ipairs(left) do
+		table.insert(result, v)
+	end
+
+	for _, v in ipairs(middle) do
+		table.insert(result, v)
+	end
+
+	for _, v in ipairs(right) do
+		table.insert(result, v)
+	end
+
+	print(table.concat(result, ", "))
+
+	return result
+end
+
+-- MAIN SCRIPT
+
+local color1 = Color3.fromRGB(34, 40, 49)
+local color2 = Color3.fromRGB(57, 62, 70)
+local color3 = Color3.fromRGB(0, 173, 181)
+local color4 = Color3.fromRGB(238, 238, 238)
+
+local gui = Instance.new("ScreenGui")
+gui.Parent = player.PlayerGui
+gui.Name = "Sorting System"
+
+gui.ResetOnSpawn = false
+gui.Enabled = true
+gui.IgnoreGuiInset = true
+
+
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Parent = gui
+mainFrame.Name = "Main Frame"
+
+mainFrame.Size = UDim2.fromScale(0.6, 0.8)
+mainFrame.Position = UDim2.fromScale(0.2, 0.1)
+mainFrame.BackgroundColor3 = color1
+mainFrame.BackgroundTransparency = 0.1
+
+local uiCorner1 = Instance.new("UICorner")
+uiCorner1.Parent = mainFrame
+
+uiCorner1.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local textBox = Instance.new("TextBox")
+textBox.Parent = mainFrame
+textBox.Name = "Add value"
+
+textBox.Size = UDim2.fromScale(0.5, 0.15)
+textBox.Position = UDim2.fromScale(0.25, 0.05)
+textBox.BackgroundColor3 = color2
+textBox.TextColor3 = color3
+textBox.PlaceholderText = "Add a value to sort"
+textBox.Text = ""
+textBox.PlaceholderColor3 = color4
+textBox.TextScaled = true
+textBox.RichText = true
+textBox.Font = Enum.Font.Jura
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Parent = textBox
+
+uiStroke.Color = Color3.new(0, 0, 0)
+
+local uiCorner2 = Instance.new("UICorner")
+uiCorner2.Parent = textBox
+
+uiCorner2.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local textButton = Instance.new("TextButton")
+textButton.Parent = mainFrame
+textButton.Name = "Add value"
+
+textButton.Size = UDim2.fromScale(0.3, 0.2)
+textButton.Position = UDim2.fromScale(0.15, 0.25)
+textButton.BackgroundColor3 = color2
+textButton.TextColor3 = color3
+textButton.Text = "Add to sort"
+textButton.TextScaled = true
+textButton.RichText = true
+textButton.Font = Enum.Font.Jura
+
+local uiStroke2 = Instance.new("UIStroke")
+uiStroke2.Parent = textButton
+
+uiStroke2.Color = Color3.new(0, 0, 0)
+
+local uiCorner3 = Instance.new("UICorner")
+uiCorner3.Parent = textButton
+
+uiCorner3.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local valuesLabel = Instance.new("TextLabel")
+valuesLabel.Parent = mainFrame
+valuesLabel.Name = "Values Frame"
+
+valuesLabel.Text = ""
+valuesLabel.TextColor3 = color3
+valuesLabel.TextScaled = true
+valuesLabel.Size = UDim2.fromScale(1, 0.15)
+valuesLabel.Position = UDim2.fromScale(0, 0.475)
+valuesLabel.BackgroundColor3 = color2
+valuesLabel.BackgroundTransparency = 0.1
+
+local uiStroke3 = Instance.new("UIStroke")
+uiStroke3.Parent = valuesLabel
+
+uiStroke3.Color = Color3.new(0, 0, 0)
+
+local uiCorner4 = Instance.new("UICorner")
+uiCorner4.Parent = valuesLabel
+
+uiCorner4.CornerRadius = UDim.new(0.1, 0)
+
+for i, v in ipairs(valuesToSort) do
+	if i == 1 then
+		valuesLabel.Text = valuesLabel.Text .. v
+	else
+		valuesLabel.Text = valuesLabel.Text .. ", " .. v
+	end
+
+end
+
+
+
+local resultsLabel = Instance.new("TextLabel")
+resultsLabel.Parent = mainFrame
+resultsLabel.Name = "Values Frame"
+
+resultsLabel.Text = "Results"
+resultsLabel.TextColor3 = color3
+resultsLabel.TextScaled = true
+resultsLabel.Size = UDim2.fromScale(1, 0.15)
+resultsLabel.Position = UDim2.fromScale(0, 0.8)
+resultsLabel.BackgroundColor3 = color2
+resultsLabel.BackgroundTransparency = 0.1
+
+local uiStroke4 = Instance.new("UIStroke")
+uiStroke4.Parent = resultsLabel
+
+uiStroke4.Color = Color3.new(0, 0, 0)
+
+local uiCorner5 = Instance.new("UICorner")
+uiCorner5.Parent = resultsLabel
+
+uiCorner5.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local bubbleSortButton = Instance.new("TextButton")
+bubbleSortButton.Parent = mainFrame
+bubbleSortButton.Name = "Bubble Sort"
+
+bubbleSortButton.Size = UDim2.fromScale(0.15, 0.1)
+bubbleSortButton.Position = UDim2.fromScale(0, 0.65)
+bubbleSortButton.BackgroundColor3 = color2
+bubbleSortButton.TextColor3 = color3
+bubbleSortButton.Text = "Bubble Sort"
+bubbleSortButton.TextScaled = true
+bubbleSortButton.RichText = true
+bubbleSortButton.Font = Enum.Font.Jura
+
+local uiStroke5 = Instance.new("UIStroke")
+uiStroke5.Parent = bubbleSortButton
+
+uiStroke5.Color = Color3.new(0, 0, 0)
+
+local uiCorner6 = Instance.new("UICorner")
+uiCorner6.Parent = bubbleSortButton
+
+uiCorner6.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local selectionSortButton = Instance.new("TextButton")
+selectionSortButton.Parent = mainFrame
+selectionSortButton.Name = "Selection Sort"
+
+selectionSortButton.Size = UDim2.fromScale(0.15, 0.1)
+selectionSortButton.Position = UDim2.fromScale(0.2, 0.65)
+selectionSortButton.BackgroundColor3 = color2
+selectionSortButton.TextColor3 = color3
+selectionSortButton.Text = "Selection Sort"
+selectionSortButton.TextScaled = true
+selectionSortButton.RichText = true
+selectionSortButton.Font = Enum.Font.Jura
+
+local uiStroke6 = Instance.new("UIStroke")
+uiStroke6.Parent = selectionSortButton
+
+uiStroke6.Color = Color3.new(0, 0, 0)
+
+local uiCorner7 = Instance.new("UICorner")
+uiCorner7.Parent = selectionSortButton
+
+uiCorner7.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local insertionSortButton = Instance.new("TextButton")
+insertionSortButton.Parent = mainFrame
+insertionSortButton.Name = "Insertion Sort"
+
+insertionSortButton.Size = UDim2.fromScale(0.15, 0.1)
+insertionSortButton.Position = UDim2.fromScale(0.4, 0.65)
+insertionSortButton.BackgroundColor3 = color2
+insertionSortButton.TextColor3 = color3
+insertionSortButton.Text = "Insertion Sort"
+insertionSortButton.TextScaled = true
+insertionSortButton.RichText = true
+insertionSortButton.Font = Enum.Font.Jura
+
+local uiStroke7 = Instance.new("UIStroke")
+uiStroke7.Parent = insertionSortButton
+
+uiStroke7.Color = Color3.new(0, 0, 0)
+
+local uiCorner8 = Instance.new("UICorner")
+uiCorner8.Parent = insertionSortButton
+
+uiCorner8.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local mergeSortButton = Instance.new("TextButton")
+mergeSortButton.Parent = mainFrame
+mergeSortButton.Name = "Merge Sort"
+
+mergeSortButton.Size = UDim2.fromScale(0.15, 0.1)
+mergeSortButton.Position = UDim2.fromScale(0.6, 0.65)
+mergeSortButton.BackgroundColor3 = color2
+mergeSortButton.TextColor3 = color3
+mergeSortButton.Text = "Merge Sort"
+mergeSortButton.TextScaled = true
+mergeSortButton.RichText = true
+mergeSortButton.Font = Enum.Font.Jura
+
+local uiStroke8 = Instance.new("UIStroke")
+uiStroke8.Parent = mergeSortButton
+
+uiStroke8.Color = Color3.new(0, 0, 0)
+
+local uiCorner9 = Instance.new("UICorner")
+uiCorner9.Parent = mergeSortButton
+
+uiCorner9.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local quickSortButton = Instance.new("TextButton")
+quickSortButton.Parent = mainFrame
+quickSortButton.Name = "Quick Sort"
+
+quickSortButton.Size = UDim2.fromScale(0.15, 0.1)
+quickSortButton.Position = UDim2.fromScale(0.8, 0.65)
+quickSortButton.BackgroundColor3 = color2
+quickSortButton.TextColor3 = color3
+quickSortButton.Text = "Quick Sort"
+quickSortButton.TextScaled = true
+quickSortButton.RichText = true
+quickSortButton.Font = Enum.Font.Jura
+
+local uiStroke9 = Instance.new("UIStroke")
+uiStroke9.Parent = quickSortButton
+
+uiStroke9.Color = Color3.new(0, 0, 0)
+
+local uiCorner10 = Instance.new("UICorner")
+uiCorner10.Parent = quickSortButton
+
+uiCorner10.CornerRadius = UDim.new(0.1, 0)
+
+
+
+local resetButton = Instance.new("TextButton")
+resetButton.Parent = mainFrame
+resetButton.Name = "Reset value"
+
+resetButton.Size = UDim2.fromScale(0.3, 0.2)
+resetButton.Position = UDim2.fromScale(0.55, 0.25)
+resetButton.BackgroundColor3 = color2
+resetButton.TextColor3 = color3
+resetButton.Text = "Reset"
+resetButton.TextScaled = true
+resetButton.RichText = true
+resetButton.Font = Enum.Font.Jura
+
+local uiStroke10 = Instance.new("UIStroke")
+uiStroke10.Parent = resetButton
+
+uiStroke10.Color = Color3.new(0, 0, 0)
+
+local uiCorner11 = Instance.new("UICorner")
+uiCorner11.Parent = resetButton
+
+uiCorner11.CornerRadius = UDim.new(0.1, 0)
+
+
+
+resetButton.MouseButton1Click:Connect(function()
+	table.clear(valuesToSort)
+	valuesLabel.Text = ""
+end)
+
+textButton.MouseButton1Click:Connect(function()
+	if debounce then
+		debounce = false
+		if tonumber(textBox.Text) then
+			table.insert(valuesToSort, tonumber(textBox.Text))
+			valuesLabel.Text = ""
+			for i, v in ipairs(valuesToSort) do
+				if i == 1 then
+					valuesLabel.Text = valuesLabel.Text .. v
+				else
+					valuesLabel.Text = valuesLabel.Text .. ", " .. v
+				end
+				
+			end
+		else
+			textBox.Text = "Only numbers are accepted."
+			task.wait(1)
+			textBox.Text = ""
+		end
+		debounce = true
+	end
+end)
+
+bubbleSortButton.MouseButton1Click:Connect(function()
+	if #valuesToSort > 0 then
+		local result = BubbleSort(valuesToSort)
+		resultsLabel.Text = result
+	end
+end)
+
+selectionSortButton.MouseButton1Click:Connect(function()
+	if #valuesToSort > 0 then
+		local result = SelectionSort(valuesToSort)
+		resultsLabel.Text = result
+	end
+end)
+
+insertionSortButton.MouseButton1Click:Connect(function()
+	if #valuesToSort > 0 then
+		local result = InsertionSort(valuesToSort)
+		resultsLabel.Text = result
+	end
+end)
+
+mergeSortButton.MouseButton1Click:Connect(function()
+	if #valuesToSort > 0 then
+		local result = MergeSort(valuesToSort)
+		resultsLabel.Text = table.concat(result, ", ")
+	end
+end)
+
+quickSortButton.MouseButton1Click:Connect(function()
+	if #valuesToSort > 0 then
+		local result = QuickSort(valuesToSort)
+		resultsLabel.Text = table.concat(result, ", ")
+	end
+end)
