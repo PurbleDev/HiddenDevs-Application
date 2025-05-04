@@ -2,523 +2,744 @@
 
 Originally made by Purble_Dev
 Discord: @purbledev
-Date: 03.02.2025
+Date: 04.05.2025
 
 Enjoy!
 
 
 QUICK HEADS UP:
-To use this scipt and make it work, you need to create a LocalScript in game.StarterGui!
+This script is for taking care of enemies with your bow, you can see how the script works in this game: https://www.roblox.com/games/72409643525900/Idle-gamer
 
 ]]--
 
-local player = game.Players.LocalPlayer
+local handler = require(game.ServerScriptService.Handler)
 
-local valuesToSort = {17, 3, 12, 8, 5, 20, 10, 1, 18, 7, 14, 2, 16, 11, 9, 15, 4, 19, 6, 13} -- write your values here, NOTE
+local upgrades = handler.upgradesList
+-- Function to handle tool activation (shooting)
+local tool = script.Parent
+local fireRate = tool:WaitForChild("FireRate")
+local range = tool:WaitForChild("Range")
+local damage = tool:WaitForChild("Damage")
+local projectileSpeed = tool:WaitForChild("ProjectileSpeed")
+local projectiles = tool:WaitForChild("Projectiles")
+local critChance = tool:WaitForChild("CriticalChance")
+local critDmg = tool:WaitForChild("CriticalDamage")
 
-local debounce = true
+local handle = tool:WaitForChild("Handle")
+local fire = tool:WaitForChild("Fire")
 
+local enemiesFolder = workspace:WaitForChild("Enemies")
+local serverStorage = game:GetService("ServerStorage")
+local TweenService = game:GetService("TweenService")
+local arrowTemplate = serverStorage.Projectiles:WaitForChild("Arrow")
 
--- SORTING FUNCTIONS
+local lastShotTime = 0
+local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 
-function BubbleSort(arr) -- BUBBLE SORT
-	local n = #arr
-	for i = 1, n do
-		for j = 1, n - i do
-			if arr[j] > arr[j + 1] then
-				arr[j], arr[j + 1] = arr[j + 1], arr[j]
-				print(table.concat(arr, ", "))
+-- Funkcja do znajdowania najbliższego wroga w zasięgu
+local function findClosestEnemy(player)
+	local closestEnemy = nil
+	local shortestDistance = range.Value + 1 + range.Value * (upgrades[6].Increase * upgrades[6].PlayerHas)/100
+
+	for _, enemy in pairs(enemiesFolder:GetChildren()) do
+		if enemy:FindFirstChild("HumanoidRootPart") then
+			local humanoid = enemy:FindFirstChild("Humanoid")
+
+			-- Sprawdzenie, czy wróg żyje
+			if humanoid and humanoid.Health > 0 then
+				local enemyPosition = enemy.HumanoidRootPart.Position
+				local distance = (enemyPosition - handle.Position).Magnitude
+
+				if distance < shortestDistance then
+					closestEnemy = enemy
+					shortestDistance = distance
+				end
 			end
 		end
 	end
-	return table.concat(arr, ", ")
+
+	return closestEnemy
 end
 
-function SelectionSort(arr) -- SELECTION SORT
-	local n = #arr
-	for i = 1, n do
-		local min_idx = i
-		for j = i + 1, n do
-			if arr[j] < arr[min_idx] then
-				min_idx = j
+-- Funkcja na strzałę pojedynczą
+local function fireArrow1(targetEnemy, player, doNoclip)
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		-- Clone the arrow and position it at the bow's handle
+		local hittedHumans = {}
+		
+		fire.PlaybackSpeed = math.random(80, 110) /100
+		fire:Play()
+		local arrow = arrowTemplate:Clone()
+		arrow.CFrame = handle.CFrame
+		arrow.Parent = workspace
+		
+		if doNoclip == true then
+			arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902)
+		end
+
+		-- Calculate the direction and distance to the enemy
+		local targetPosition = targetEnemy.HumanoidRootPart.Position
+		local distanceToTarget = (targetPosition - arrow.Position).Magnitude
+
+		-- Calculate the time required for the arrow to reach the target based on projectile speed
+		local travelTime = distanceToTarget / projectileSpeed.Value / 5
+
+		local trueDistance = distanceToTarget/travelTime*5
+
+		local direction = (targetPosition - arrow.Position).Unit
+
+		local newTargetPosition = arrow.Position + (direction * trueDistance)
+
+		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+		local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear)
+		local tweenGoal = {Position = newTargetPosition}
+
+		local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
+
+		arrowTween:Play()
+
+		-- Collision detection logic
+		local traveledDistance = 0
+		local connection
+		connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+			-- Update traveled distance
+			traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+			-- Check for collisions
+			local raycastResult = workspace:Raycast(arrow.Position, (targetPosition - arrow.Position).Unit * 2) -- Short ray for impact detection
+			
+
+			
+			if raycastResult then
+				local hitPart = raycastResult.Instance
+
+				-- Check if the hit part is the target enemy or another enemy
+				local hitParent = hitPart.Parent
+				local humanoid = hitParent:FindFirstChild("Humanoid")
+
+				if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+					-- Zadaj obrażenia wrogowi
+					table.insert(hittedHumans, humanoid)
+					local rageBonus = 1
+					
+					if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+						
+						rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+						
+					end
+					
+					
+					local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus
+					local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
+
+					local letsSee = math.random(1, 100)
+
+					if doNoclip == false then
+						arrow:Destroy()
+						connection:Disconnect()
+						table.clear(hittedHumans)
+					end
+
+					if letsSee <= critVal then
+
+						local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()
+						clone.Name = "Clone"
+						clone.Parent = hitParent.Head.BillboardGui2
+						clone.Position = UDim2.new(0,0,0.5,0)
+						clone.Visible = true
+						dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)
+						humanoid:TakeDamage(dmg)
+						hitParent.crit_received:Play()
+						TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play()
+						wait(0.9)
+						clone:Destroy()
+					else
+						
+						humanoid:TakeDamage(dmg)
+						
+					end
+				elseif hitParent == workspace.Map.Walls then
+					-- Zniszczenie strzały, jeśli trafi w ścianę
+					if doNoclip == false then
+						arrow:Destroy()
+						connection:Disconnect()
+						table.clear(hittedHumans)
+					end
+					
+				end
+			elseif traveledDistance >= range.Value then
+				-- Destroy the arrow if it exceeds the max range
+				arrow:Destroy()
+				connection:Disconnect()
+				table.clear(hittedHumans)
 			end
+		end)
+
+		-- Automatically destroy the arrow after 5 seconds as a failsafe
+		game:GetService("Debris"):AddItem(arrow, 5)
+	end
+end
+
+local function fireArrow2(targetEnemy, player, doNoclip)
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		fire.PlaybackSpeed = math.random(80, 110) / 100
+		fire:Play()
+		local hittedHumans = {}
+		-- Oblicz kierunek do celu
+		local targetPosition = targetEnemy.HumanoidRootPart.Position
+		local direction = (targetPosition - handle.Position).Unit
+
+		-- Ustawienie rozdzielenia strzałek na lewo i prawo (rozsunięcie poziome)
+		local horizontalSpread = 0.03 -- Rozsunięcie strzałek w lewo i prawo o 5 jednostek
+
+		-- Definiujemy dwa strzały dla formy | |
+		for i = -1, 1, 2 do
+			-- Klonowanie strzały i ustawienie jej przy uchwycie
+			
+			local arrow = arrowTemplate:Clone()
+			arrow.CFrame = handle.CFrame
+			arrow.Parent = workspace
+			
+			if doNoclip == true then
+				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902)
+			end
+
+			-- Skorygowanie kierunku dla rozdzielenia na boki (horyzontalnie)
+			local spreadDirection = (direction + Vector3.new(i * horizontalSpread, 0, 0)).Unit
+
+			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
+
+			-- Calculate the time required for the arrow to reach the target based on projectile speed
+			local travelTime = distanceToTarget / projectileSpeed.Value / 5
+
+			local trueDistance = distanceToTarget/travelTime*5
+
+			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+
+			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear)
+			local tweenGoal = {Position = newTargetPosition}
+
+			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
+
+			arrowTween:Play()
+
+			-- Logika wykrywania kolizji
+			local traveledDistance = 0
+			local connection
+			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+				-- Sprawdzanie kolizji
+				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Krótki promień do wykrywania kolizji
+
+				if raycastResult then
+					local hitPart = raycastResult.Instance
+
+					-- Check if the hit part is the target enemy or another enemy
+					local hitParent = hitPart.Parent
+					local humanoid = hitParent:FindFirstChild("Humanoid")
+
+					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+						-- Zadaj obrażenia wrogowi
+						table.insert(hittedHumans, humanoid)
+						local rageBonus = 1
+
+						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+
+							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+
+						end
+
+						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus
+
+						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
+
+						local letsSee = math.random(1, 100)
+
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+						if letsSee <= critVal then
+
+							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()
+							clone.Name = "Clone"
+							clone.Parent = hitParent.Head.BillboardGui2
+							clone.Position = UDim2.new(0,0,0.5,0)
+							clone.Visible = true
+							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)
+							humanoid:TakeDamage(dmg)
+							hitParent.crit_received:Play()
+							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play()
+							wait(0.9)
+							clone:Destroy()
+						else
+
+							humanoid:TakeDamage(dmg)
+
+						end
+					elseif hitParent == workspace.Map.Walls then
+						-- Zniszczenie strzały, jeśli trafi w ścianę
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+					end
+				elseif traveledDistance >= range.Value then
+					-- Destroy the arrow if it exceeds the max range
+					arrow:Destroy()
+					connection:Disconnect()
+					table.clear(hittedHumans)
+				end
+			end)
+
+			-- Automatyczne zniszczenie strzały po 5 sekundach jako zabezpieczenie
+			game:GetService("Debris"):AddItem(arrow, 5)
 		end
-		arr[i], arr[min_idx] = arr[min_idx], arr[i]
-		print(table.concat(arr, ", "))
 	end
-	return table.concat(arr, ", ")
 end
 
-function InsertionSort(arr) -- INSERTION SORT
-	local n = #arr
-	for i = 2, n do
-		local key = arr[i]
-		local j = i - 1
-		while j >= 1 and arr[j] > key do
-			arr[j + 1] = arr[j]
-			j = j - 1
+local function fireArrow3(targetEnemy, player, doNoclip)
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		fire.PlaybackSpeed = math.random(80, 110) / 100
+		fire:Play()
+		local hittedHumans = {}
+		-- Oblicz kierunek do celu
+		local targetPosition = targetEnemy.HumanoidRootPart.Position
+		local direction = (targetPosition - handle.Position).Unit
+
+		-- Ustawienie rozdzielenia strzałek na lewo i prawo (rozsunięcie poziome)
+		local horizontalSpread = 0.1 -- Rozsunięcie strzałek w lewo i prawo o 0.03 jednostki
+
+		-- Definiujemy trzy strzały: lewą, prawą i środkową
+		for i = -1, 1 do
+			-- Klonowanie strzały i ustawienie jej przy uchwycie
+			local arrow = arrowTemplate:Clone()
+			arrow.CFrame = handle.CFrame
+			arrow.Parent = workspace
+			
+			if doNoclip == true then
+				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902)
+			end
+			-- Skorygowanie kierunku dla rozdzielenia na boki (horyzontalnie), strzała środkowa leci prosto
+			local spreadDirection
+			if i == 0 then
+				spreadDirection = direction -- Strzała środkowa leci prosto
+			else
+				spreadDirection = (direction + Vector3.new(i * horizontalSpread, 0, 0)).Unit -- Strzały boczne
+			end
+
+			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
+
+			-- Calculate the time required for the arrow to reach the target based on projectile speed
+			local travelTime = distanceToTarget / projectileSpeed.Value / 5
+
+			local trueDistance = distanceToTarget/travelTime*5
+
+			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+
+			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear)
+			local tweenGoal = {Position = newTargetPosition}
+
+			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
+
+			arrowTween:Play()
+
+			-- Logika wykrywania kolizji
+			local traveledDistance = 0
+			local connection
+			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+				-- Sprawdzanie kolizji
+				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Krótki promień do wykrywania kolizji
+
+				if raycastResult then
+					local hitPart = raycastResult.Instance
+
+					-- Check if the hit part is the target enemy or another enemy
+					local hitParent = hitPart.Parent
+					local humanoid = hitParent:FindFirstChild("Humanoid")
+
+					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+						-- Zadaj obrażenia wrogowi
+						table.insert(hittedHumans, humanoid)
+						local rageBonus = 1
+
+						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+
+							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+
+						end
+
+						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus
+
+						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
+
+						local letsSee = math.random(1, 100)
+
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+						if letsSee <= critVal then
+
+							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()
+							clone.Name = "Clone"
+							clone.Parent = hitParent.Head.BillboardGui2
+							clone.Position = UDim2.new(0,0,0.5,0)
+							clone.Visible = true
+							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)
+							humanoid:TakeDamage(dmg)
+							hitParent.crit_received:Play()
+							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play()
+							wait(0.9)
+							clone:Destroy()
+						else
+
+							humanoid:TakeDamage(dmg)
+
+						end
+					elseif hitParent == workspace.Map.Walls then
+						-- Zniszczenie strzały, jeśli trafi w ścianę
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+					end
+				elseif traveledDistance >= range.Value then
+					-- Destroy the arrow if it exceeds the max range
+					arrow:Destroy()
+					connection:Disconnect()
+					table.clear(hittedHumans)
+				end
+			end)
+
+			-- Automatyczne zniszczenie strzały po 5 sekundach jako zabezpieczenie
+			game:GetService("Debris"):AddItem(arrow, 5)
 		end
-		arr[j + 1] = key
-		print(table.concat(arr, ", "))
 	end
-	return table.concat(arr, ", ")
 end
 
-function Merge(left, right) -- MERGE SORT
-	local result = {}
-	local i, j = 1, 1
+local function fireArrow4(targetEnemy, player, doNoclip)
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		fire.PlaybackSpeed = math.random(80, 110) / 100
+		fire:Play()
+		local hittedHumans = {}
+		-- Oblicz kierunek do celu
+		local targetPosition = targetEnemy.HumanoidRootPart.Position
+		local direction = (targetPosition - handle.Position).Unit
 
+		-- Ustawienie rozdzielenia strzałek na lewo i prawo (rozsunięcie poziome)
+		local horizontalSpread = 0.15 -- Rozsunięcie strzałek w lewo i prawo o jednostki
 
-	while i <= #left and j <= #right do
-		if left[i] < right[j] then
-			table.insert(result, left[i])
-			i = i + 1
-		else
-			table.insert(result, right[j])
-			j = j + 1
+		-- Definiujemy wartości dla trzech strzał: lewa, prawa (bez środkowej)
+		local spreadOffsets = {-1.5, -0.5, 0.5, 1.5} -- Równe rozmieszczenie bez i = 0
+
+		for _, offset in ipairs(spreadOffsets) do
+			-- Klonowanie strzały i ustawienie jej przy uchwycie
+			local arrow = arrowTemplate:Clone()
+			arrow.CFrame = handle.CFrame
+			arrow.Parent = workspace
+			
+			if doNoclip == true then
+				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902)
+			end
+
+			-- Skorygowanie kierunku dla rozdzielenia na boki (horyzontalnie)
+			local spreadDirection = (direction + Vector3.new(offset * horizontalSpread, 0, 0)).Unit
+
+			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
+
+			-- Calculate the time required for the arrow to reach the target based on projectile speed
+			local travelTime = distanceToTarget / projectileSpeed.Value / 5
+
+			local trueDistance = distanceToTarget/travelTime*5
+
+			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+
+			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear)
+			local tweenGoal = {Position = newTargetPosition}
+
+			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
+
+			arrowTween:Play()
+
+			-- Logika wykrywania kolizji
+			local traveledDistance = 0
+			local connection
+			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+				-- Sprawdzanie kolizji
+				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Krótki promień do wykrywania kolizji
+
+				if raycastResult then
+					local hitPart = raycastResult.Instance
+
+					-- Check if the hit part is the target enemy or another enemy
+					local hitParent = hitPart.Parent
+					local humanoid = hitParent:FindFirstChild("Humanoid")
+
+					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+						-- Zadaj obrażenia wrogowi
+						table.insert(hittedHumans, humanoid)
+						local rageBonus = 1
+
+						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+
+							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+
+						end
+
+						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus
+
+						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
+
+						local letsSee = math.random(1, 100)
+
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+						if letsSee <= critVal then
+
+							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()
+							clone.Name = "Clone"
+							clone.Parent = hitParent.Head.BillboardGui2
+							clone.Position = UDim2.new(0,0,0.5,0)
+							clone.Visible = true
+							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)
+							humanoid:TakeDamage(dmg)
+							hitParent.crit_received:Play()
+							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play()
+							wait(0.9)
+							clone:Destroy()
+						else
+
+							humanoid:TakeDamage(dmg)
+
+						end
+					elseif hitParent == workspace.Map.Walls then
+						-- Zniszczenie strzały, jeśli trafi w ścianę
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+					end
+				elseif traveledDistance >= range.Value then
+					-- Destroy the arrow if it exceeds the max range
+					arrow:Destroy()
+					connection:Disconnect()
+					table.clear(hittedHumans)
+				end
+			end)
+
+			-- Automatyczne zniszczenie strzały po 5 sekundach jako zabezpieczenie
+			game:GetService("Debris"):AddItem(arrow, 5)
 		end
 	end
-
-	while i <= #left do
-		table.insert(result, left[i])
-		i = i + 1
-	end
-
-	while j <= #right do
-		table.insert(result, right[j])
-		j = j + 1
-	end
-	print(table.concat(result, ", "))
-
-	return result
 end
 
-function MergeSort(arr)
-	if #arr <= 1 then
-		return arr
-	end
-	local mid = math.floor(#arr / 2)
-	local left = MergeSort({table.unpack(arr, 1, mid)})
-	local right = MergeSort({table.unpack(arr, mid + 1, #arr)})
-	return Merge(left, right)
-end
 
-function QuickSort(arr) -- QUICK SORT
-	if #arr <= 1 then
-		return arr
-	end
+local function fireArrow5(targetEnemy, player, doNoclip)
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		fire.PlaybackSpeed = math.random(80, 110) / 100
+		fire:Play()
+		local hittedHumans = {}
+		-- Oblicz kierunek do celu
+		local targetPosition = targetEnemy.HumanoidRootPart.Position
+		local direction = (targetPosition - handle.Position).Unit
 
-	local pivot = arr[math.floor(#arr / 2)]
-	local left = {}
-	local right = {}
-	local middle = {}
+		-- Ustawienie rozdzielenia strzałek na lewo i prawo (rozsunięcie poziome)
+		local horizontalSpread = 0.15 -- Rozsunięcie strzałek w lewo i prawo o 0.03 jednostki
 
-	for i = 1, #arr do
-		if arr[i] < pivot then
-			table.insert(left, arr[i])
-		elseif arr[i] > pivot then
-			table.insert(right, arr[i])
-		else
-			table.insert(middle, arr[i])
+		-- Definiujemy trzy strzały: lewą, prawą i środkową
+		for i = -2, 2 do
+			-- Klonowanie strzały i ustawienie jej przy uchwycie
+			local arrow = arrowTemplate:Clone()
+			arrow.CFrame = handle.CFrame
+			arrow.Parent = workspace
+			
+			if doNoclip == true then
+				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902)
+			end
+			-- Skorygowanie kierunku dla rozdzielenia na boki (horyzontalnie), strzała środkowa leci prosto
+			local spreadDirection
+			if i == 0 then
+				spreadDirection = direction -- Strzała środkowa leci prosto
+			else
+				spreadDirection = (direction + Vector3.new(i * horizontalSpread, 0, 0)).Unit -- Strzały boczne
+			end
+
+			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
+
+			-- Calculate the time required for the arrow to reach the target based on projectile speed
+			local travelTime = distanceToTarget / projectileSpeed.Value / 5
+
+			local trueDistance = distanceToTarget/travelTime*5
+
+			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+
+			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear)
+			local tweenGoal = {Position = newTargetPosition}
+
+			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
+
+			arrowTween:Play()
+
+			-- Logika wykrywania kolizji
+			local traveledDistance = 0
+			local connection
+			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+				-- Sprawdzanie kolizji
+				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Krótki promień do wykrywania kolizji
+
+				if raycastResult then
+					local hitPart = raycastResult.Instance
+
+					-- Check if the hit part is the target enemy or another enemy
+					local hitParent = hitPart.Parent
+					local humanoid = hitParent:FindFirstChild("Humanoid")
+
+					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+						-- Zadaj obrażenia wrogowi
+						table.insert(hittedHumans, humanoid)
+						local rageBonus = 1
+
+						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+
+							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+
+						end
+
+						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus
+
+						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
+
+						local letsSee = math.random(1, 100)
+
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+						if letsSee <= critVal then
+
+							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()
+							clone.Name = "Clone"
+							clone.Parent = hitParent.Head.BillboardGui2
+							clone.Position = UDim2.new(0,0,0.5,0)
+							clone.Visible = true
+							
+							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)
+							humanoid:TakeDamage(dmg)
+							hitParent.crit_received:Play()
+							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play()
+							wait(0.9)
+							clone:Destroy()
+						else
+
+							humanoid:TakeDamage(dmg)
+
+						end
+					elseif hitParent == workspace.Map.Walls then
+						-- Zniszczenie strzały, jeśli trafi w ścianę
+						if doNoclip == false then
+							arrow:Destroy()
+							connection:Disconnect()
+							table.clear(hittedHumans)
+						end
+
+					end
+				elseif traveledDistance >= range.Value then
+					-- Destroy the arrow if it exceeds the max range
+					arrow:Destroy()
+					connection:Disconnect()
+					table.clear(hittedHumans)
+				end
+			end)
+
+			-- Automatyczne zniszczenie strzały po 5 sekundach jako zabezpieczenie
+			game:GetService("Debris"):AddItem(arrow, 5)
 		end
 	end
-
-	left = QuickSort(left)
-	right = QuickSort(right)
-
-	return Concat(left, middle, right)
 end
-
-function Concat(left, middle, right)
-	local result = {}
-
-	for _, v in ipairs(left) do
-		table.insert(result, v)
-	end
-
-	for _, v in ipairs(middle) do
-		table.insert(result, v)
-	end
-
-	for _, v in ipairs(right) do
-		table.insert(result, v)
-	end
-
-	print(table.concat(result, ", "))
-
-	return result
-end
-
--- MAIN SCRIPT
-
-local color1 = Color3.fromRGB(34, 40, 49)
-local color2 = Color3.fromRGB(57, 62, 70)
-local color3 = Color3.fromRGB(0, 173, 181)
-local color4 = Color3.fromRGB(238, 238, 238)
-
-local gui = Instance.new("ScreenGui")
-gui.Parent = player.PlayerGui
-gui.Name = "Sorting System"
-
-gui.ResetOnSpawn = false
-gui.Enabled = true
-gui.IgnoreGuiInset = true
-
-
-
-local mainFrame = Instance.new("Frame")
-mainFrame.Parent = gui
-mainFrame.Name = "Main Frame"
-
-mainFrame.Size = UDim2.fromScale(0.6, 0.8)
-mainFrame.Position = UDim2.fromScale(0.2, 0.1)
-mainFrame.BackgroundColor3 = color1
-mainFrame.BackgroundTransparency = 0.1
-
-local uiCorner1 = Instance.new("UICorner")
-uiCorner1.Parent = mainFrame
-
-uiCorner1.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local noteLabel = Instance.new("TextLabel")
-noteLabel.Parent = mainFrame
-noteLabel.Name = "Important note frame"
-
-noteLabel.Text = "IMPORTANT: Click F9 for a dev console, to see how your values got sorted!"
-noteLabel.TextColor3 = color3
-noteLabel.TextScaled = true
-noteLabel.Size = UDim2.fromScale(1, 0.1)
-noteLabel.Position = UDim2.fromScale(0, -0.1)
-noteLabel.BackgroundColor3 = color2
-noteLabel.BackgroundTransparency = 0.1
-
-
-
-local textBox = Instance.new("TextBox")
-textBox.Parent = mainFrame
-textBox.Name = "Add value"
-
-textBox.Size = UDim2.fromScale(0.5, 0.15)
-textBox.Position = UDim2.fromScale(0.25, 0.05)
-textBox.BackgroundColor3 = color2
-textBox.TextColor3 = color3
-textBox.PlaceholderText = "Add a value to sort"
-textBox.Text = ""
-textBox.PlaceholderColor3 = color4
-textBox.TextScaled = true
-textBox.RichText = true
-textBox.Font = Enum.Font.Jura
-
-local uiStroke = Instance.new("UIStroke")
-uiStroke.Parent = textBox
-
-uiStroke.Color = Color3.new(0, 0, 0)
-
-local uiCorner2 = Instance.new("UICorner")
-uiCorner2.Parent = textBox
-
-uiCorner2.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local textButton = Instance.new("TextButton")
-textButton.Parent = mainFrame
-textButton.Name = "Add value"
-
-textButton.Size = UDim2.fromScale(0.3, 0.2)
-textButton.Position = UDim2.fromScale(0.15, 0.25)
-textButton.BackgroundColor3 = color2
-textButton.TextColor3 = color3
-textButton.Text = "Add to sort"
-textButton.TextScaled = true
-textButton.RichText = true
-textButton.Font = Enum.Font.Jura
-
-local uiStroke2 = Instance.new("UIStroke")
-uiStroke2.Parent = textButton
-
-uiStroke2.Color = Color3.new(0, 0, 0)
-
-local uiCorner3 = Instance.new("UICorner")
-uiCorner3.Parent = textButton
-
-uiCorner3.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local valuesLabel = Instance.new("TextLabel")
-valuesLabel.Parent = mainFrame
-valuesLabel.Name = "Values Frame"
-
-valuesLabel.Text = ""
-valuesLabel.TextColor3 = color3
-valuesLabel.TextScaled = true
-valuesLabel.Size = UDim2.fromScale(1, 0.15)
-valuesLabel.Position = UDim2.fromScale(0, 0.475)
-valuesLabel.BackgroundColor3 = color2
-valuesLabel.BackgroundTransparency = 0.1
-
-local uiStroke3 = Instance.new("UIStroke")
-uiStroke3.Parent = valuesLabel
-
-uiStroke3.Color = Color3.new(0, 0, 0)
-
-local uiCorner4 = Instance.new("UICorner")
-uiCorner4.Parent = valuesLabel
-
-uiCorner4.CornerRadius = UDim.new(0.1, 0)
-
-for i, v in ipairs(valuesToSort) do
-	if i == 1 then
-		valuesLabel.Text = valuesLabel.Text .. v
-	else
-		valuesLabel.Text = valuesLabel.Text .. ", " .. v
-	end
-
-end
-
-
-
-local resultsLabel = Instance.new("TextLabel")
-resultsLabel.Parent = mainFrame
-resultsLabel.Name = "Values Frame"
-
-resultsLabel.Text = "Results"
-resultsLabel.TextColor3 = color3
-resultsLabel.TextScaled = true
-resultsLabel.Size = UDim2.fromScale(1, 0.15)
-resultsLabel.Position = UDim2.fromScale(0, 0.8)
-resultsLabel.BackgroundColor3 = color2
-resultsLabel.BackgroundTransparency = 0.1
-
-local uiStroke4 = Instance.new("UIStroke")
-uiStroke4.Parent = resultsLabel
-
-uiStroke4.Color = Color3.new(0, 0, 0)
-
-local uiCorner5 = Instance.new("UICorner")
-uiCorner5.Parent = resultsLabel
-
-uiCorner5.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local bubbleSortButton = Instance.new("TextButton")
-bubbleSortButton.Parent = mainFrame
-bubbleSortButton.Name = "Bubble Sort"
-
-bubbleSortButton.Size = UDim2.fromScale(0.15, 0.1)
-bubbleSortButton.Position = UDim2.fromScale(0, 0.65)
-bubbleSortButton.BackgroundColor3 = color2
-bubbleSortButton.TextColor3 = color3
-bubbleSortButton.Text = "Bubble Sort"
-bubbleSortButton.TextScaled = true
-bubbleSortButton.RichText = true
-bubbleSortButton.Font = Enum.Font.Jura
-
-local uiStroke5 = Instance.new("UIStroke")
-uiStroke5.Parent = bubbleSortButton
-
-uiStroke5.Color = Color3.new(0, 0, 0)
-
-local uiCorner6 = Instance.new("UICorner")
-uiCorner6.Parent = bubbleSortButton
-
-uiCorner6.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local selectionSortButton = Instance.new("TextButton")
-selectionSortButton.Parent = mainFrame
-selectionSortButton.Name = "Selection Sort"
-
-selectionSortButton.Size = UDim2.fromScale(0.15, 0.1)
-selectionSortButton.Position = UDim2.fromScale(0.2, 0.65)
-selectionSortButton.BackgroundColor3 = color2
-selectionSortButton.TextColor3 = color3
-selectionSortButton.Text = "Selection Sort"
-selectionSortButton.TextScaled = true
-selectionSortButton.RichText = true
-selectionSortButton.Font = Enum.Font.Jura
-
-local uiStroke6 = Instance.new("UIStroke")
-uiStroke6.Parent = selectionSortButton
-
-uiStroke6.Color = Color3.new(0, 0, 0)
-
-local uiCorner7 = Instance.new("UICorner")
-uiCorner7.Parent = selectionSortButton
-
-uiCorner7.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local insertionSortButton = Instance.new("TextButton")
-insertionSortButton.Parent = mainFrame
-insertionSortButton.Name = "Insertion Sort"
-
-insertionSortButton.Size = UDim2.fromScale(0.15, 0.1)
-insertionSortButton.Position = UDim2.fromScale(0.4, 0.65)
-insertionSortButton.BackgroundColor3 = color2
-insertionSortButton.TextColor3 = color3
-insertionSortButton.Text = "Insertion Sort"
-insertionSortButton.TextScaled = true
-insertionSortButton.RichText = true
-insertionSortButton.Font = Enum.Font.Jura
-
-local uiStroke7 = Instance.new("UIStroke")
-uiStroke7.Parent = insertionSortButton
-
-uiStroke7.Color = Color3.new(0, 0, 0)
-
-local uiCorner8 = Instance.new("UICorner")
-uiCorner8.Parent = insertionSortButton
-
-uiCorner8.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local mergeSortButton = Instance.new("TextButton")
-mergeSortButton.Parent = mainFrame
-mergeSortButton.Name = "Merge Sort"
-
-mergeSortButton.Size = UDim2.fromScale(0.15, 0.1)
-mergeSortButton.Position = UDim2.fromScale(0.6, 0.65)
-mergeSortButton.BackgroundColor3 = color2
-mergeSortButton.TextColor3 = color3
-mergeSortButton.Text = "Merge Sort"
-mergeSortButton.TextScaled = true
-mergeSortButton.RichText = true
-mergeSortButton.Font = Enum.Font.Jura
-
-local uiStroke8 = Instance.new("UIStroke")
-uiStroke8.Parent = mergeSortButton
-
-uiStroke8.Color = Color3.new(0, 0, 0)
-
-local uiCorner9 = Instance.new("UICorner")
-uiCorner9.Parent = mergeSortButton
-
-uiCorner9.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local quickSortButton = Instance.new("TextButton")
-quickSortButton.Parent = mainFrame
-quickSortButton.Name = "Quick Sort"
-
-quickSortButton.Size = UDim2.fromScale(0.15, 0.1)
-quickSortButton.Position = UDim2.fromScale(0.8, 0.65)
-quickSortButton.BackgroundColor3 = color2
-quickSortButton.TextColor3 = color3
-quickSortButton.Text = "Quick Sort"
-quickSortButton.TextScaled = true
-quickSortButton.RichText = true
-quickSortButton.Font = Enum.Font.Jura
-
-local uiStroke9 = Instance.new("UIStroke")
-uiStroke9.Parent = quickSortButton
-
-uiStroke9.Color = Color3.new(0, 0, 0)
-
-local uiCorner10 = Instance.new("UICorner")
-uiCorner10.Parent = quickSortButton
-
-uiCorner10.CornerRadius = UDim.new(0.1, 0)
-
-
-
-local resetButton = Instance.new("TextButton")
-resetButton.Parent = mainFrame
-resetButton.Name = "Reset value"
-
-resetButton.Size = UDim2.fromScale(0.3, 0.2)
-resetButton.Position = UDim2.fromScale(0.55, 0.25)
-resetButton.BackgroundColor3 = color2
-resetButton.TextColor3 = color3
-resetButton.Text = "Reset"
-resetButton.TextScaled = true
-resetButton.RichText = true
-resetButton.Font = Enum.Font.Jura
-
-local uiStroke10 = Instance.new("UIStroke")
-uiStroke10.Parent = resetButton
-
-uiStroke10.Color = Color3.new(0, 0, 0)
-
-local uiCorner11 = Instance.new("UICorner")
-uiCorner11.Parent = resetButton
-
-uiCorner11.CornerRadius = UDim.new(0.1, 0)
-
-
-
-resetButton.MouseButton1Click:Connect(function()
-	table.clear(valuesToSort)
-	valuesLabel.Text = ""
-end)
-
-textButton.MouseButton1Click:Connect(function()
-	if debounce then
-		debounce = false
-		if tonumber(textBox.Text) then
-			table.insert(valuesToSort, tonumber(textBox.Text))
-			valuesLabel.Text = ""
-			for i, v in ipairs(valuesToSort) do
-				if i == 1 then
-					valuesLabel.Text = valuesLabel.Text .. v
-				else
-					valuesLabel.Text = valuesLabel.Text .. ", " .. v
+-- Funkcja obsługująca aktywację narzędzia (strzelanie)
+while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do
+	local player = game.Players:GetPlayerFromCharacter(tool.Parent) -- Pobranie gracza trzymającego narzędzie
+
+	if player then
+		local closestEnemy = findClosestEnemy(player)
+		if closestEnemy then
+			
+			local doNoclip = false
+			
+			if upgrades[16].PlayerHas > 0 then
+				
+				local randomNumb = math.random(1,100)
+				print(randomNumb, upgrades[16].PlayerHas * upgrades[16].Increase)
+				
+				if randomNumb <= upgrades[16].PlayerHas * upgrades[16].Increase then
+					
+					doNoclip = true
+					
 				end
 				
 			end
-		else
-			textBox.Text = "Only numbers are accepted."
-			task.wait(1)
-			textBox.Text = ""
+			
+			local projectileNumber = projectiles.Value + upgrades[7].PlayerHas
+			
+			if projectileNumber == 1 then
+
+				fireArrow1(closestEnemy, player, doNoclip)
+
+			elseif projectileNumber == 2 then
+
+				fireArrow2(closestEnemy, player, doNoclip)
+
+			elseif projectileNumber == 3 then
+
+				fireArrow3(closestEnemy, player, doNoclip)
+
+			elseif projectileNumber == 4 then
+
+				fireArrow4(closestEnemy, player, doNoclip)
+
+			elseif projectileNumber == 5 then
+
+				fireArrow5(closestEnemy, player, doNoclip)
+			
+			else
+				
+				warn("Invalid number of projectiles detected!")
+			
+			end
+
 		end
-		debounce = true
 	end
-end)
-
-bubbleSortButton.MouseButton1Click:Connect(function()
-	if #valuesToSort > 0 then
-		print("-----===== Bubble Sort =====-----")
-		local result = BubbleSort(valuesToSort)
-		resultsLabel.Text = result
-	end
-end)
-
-selectionSortButton.MouseButton1Click:Connect(function()
-	if #valuesToSort > 0 then
-		print("-----===== Selection Sort =====-----")
-		local result = SelectionSort(valuesToSort)
-		resultsLabel.Text = result
-	end
-end)
-
-insertionSortButton.MouseButton1Click:Connect(function()
-	if #valuesToSort > 0 then
-		print("-----===== Insertion Sort =====-----")
-		local result = InsertionSort(valuesToSort)
-		resultsLabel.Text = result
-	end
-end)
-
-mergeSortButton.MouseButton1Click:Connect(function()
-	if #valuesToSort > 0 then
-		print("-----===== Merge Sort =====-----")
-		local result = MergeSort(valuesToSort)
-		resultsLabel.Text = table.concat(result, ", ")
-	end
-end)
-
-quickSortButton.MouseButton1Click:Connect(function()
-	if #valuesToSort > 0 then
-		print("-----===== Quick Sort =====-----")
-		local result = QuickSort(valuesToSort)
-		resultsLabel.Text = table.concat(result, ", ")
-	end
-end)
+end
