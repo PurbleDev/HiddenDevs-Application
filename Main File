@@ -1,19 +1,15 @@
---[[
-
-Originally made by Purble_Dev
+--[[ Originally made by Purble_Dev
 Discord: @purbledev
 Date: 04.05.2025
-
 Enjoy!
 
-
 QUICK HEADS UP:
-This script is for taking care of enemies with your bow, you can see how the script works in this game: https://www.roblox.com/games/72409643525900/Idle-gamer
-
+This script is for taking care of enemies with your bow,
+you can see how the script works in this game:
+https://www.roblox.com/games/72409643525900/Idle-gamer
 ]]--
 
 local handler = require(game.ServerScriptService.Handler)
-
 local upgrades = handler.upgradesList
 
 local tool = script.Parent
@@ -24,7 +20,6 @@ local projectileSpeed = tool:WaitForChild("ProjectileSpeed")
 local projectiles = tool:WaitForChild("Projectiles")
 local critChance = tool:WaitForChild("CriticalChance")
 local critDmg = tool:WaitForChild("CriticalDamage")
-
 local handle = tool:WaitForChild("Handle")
 local fire = tool:WaitForChild("Fire")
 
@@ -36,17 +31,17 @@ local arrowTemplate = serverStorage.Projectiles:WaitForChild("Arrow")
 local lastShotTime = 0
 local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 
--- function to locate and initialize the closest enemy to the player
+-- Function to find the closest enemy within range
 local function findClosestEnemy(player)
 	local closestEnemy = nil
-	local shortestDistance = range.Value + 1 + range.Value * (upgrades[6].Increase * upgrades[6].PlayerHas)/100
+	local shortestDistance = range.Value + 1 + range.Value * (upgrades[6].Increase * upgrades[6].PlayerHas)/100 -- gets the shortest possible distance to find an enemy
 
 
-	for _, enemy in pairs(enemiesFolder:GetChildren()) do -- goes through every enemy
+	for _, enemy in pairs(enemiesFolder:GetChildren()) do -- goes through every enemy in the Enemies folder
 		if enemy:FindFirstChild("HumanoidRootPart") then
 			local humanoid = enemy:FindFirstChild("Humanoid")
 
-			if humanoid and humanoid.Health > 0 then-- checks, if humanoid and if its alive
+			if humanoid and humanoid.Health > 0 then-- checks, if there's a humanoid and if its alive
 				local enemyPosition = enemy.HumanoidRootPart.Position
 				local distance = (enemyPosition - handle.Position).Magnitude
 
@@ -61,682 +56,250 @@ local function findClosestEnemy(player)
 	return closestEnemy -- returns back with the closest enemy found
 end
 
--- function for firing a single arrow, including setting its target position, cframe and handling the optional
--- collision with enemy/enemies (depends on the arrow collision upgrade), and calculating the damage
--- with base damage (upgrade), optional critical damage and rage boost
-local function fireArrow1(targetEnemy, player, doNoclip)
+
+
+-- Function to calculate the direction and distance to the target
+local function calculateTrajectory(arrowPosition, targetPosition)
+	local direction = (targetPosition - arrowPosition).Unit -- calculate the direction
+	local distance = (targetPosition - arrowPosition).Magnitude
+	local travelTime = distance / projectileSpeed.Value / 5
+	local trueDistance = distance / travelTime * 5 -- the actual distance
+	local newTargetPosition = arrowPosition + (direction * trueDistance)
+	return direction, newTargetPosition
+end
+
+-- Function to create and configure the arrow
+local function createArrow(doNoclip)
+	local arrow = arrowTemplate:Clone() -- clone the arrow and put it in workspace
+	arrow.CFrame = handle.CFrame
+	arrow.Parent = workspace
+
+	if doNoclip == true then
+		arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902) -- turn to lime green color if arrow can noclip through
+	end
+
+	return arrow
+end
+
+-- Function to handle the arrow's movement
+local function moveArrow(arrow, newTargetPosition)
+	local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear) -- set the TweenInfo
+	local tweenGoal = {Position = newTargetPosition}
+	local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
+	arrowTween:Play() -- play the tween
+end
+
+-- Function to handle collision detection and damage application
+local function handleCollision(arrow, targetEnemy, player, doNoclip)
+	local hittedHumans = {}
+	local traveledDistance = 0
+
 	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		local hittedHumans = {}
-		
-		fire.PlaybackSpeed = math.random(80, 110) /100
-		fire:Play()
-		local arrow = arrowTemplate:Clone()
-		arrow.CFrame = handle.CFrame
-		arrow.Parent = workspace
-		
-		if doNoclip == true then 
-			arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902) -- if arrow can noclip, set its color to lime green
-		end
-
-		-- calculate the direction and distance to the enemy
-		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local distanceToTarget = (targetPosition - arrow.Position).Magnitude
-
-		-- calculate the time required for the arrow to reach the target based on projectile speed
-		local travelTime = distanceToTarget / projectileSpeed.Value / 5
-
-		local trueDistance = distanceToTarget/travelTime*5
-
-		local direction = (targetPosition - arrow.Position).Unit -- calculates the direction 
-
-		local newTargetPosition = arrow.Position + (direction * trueDistance)
-
-		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-		local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear) -- sets up a new tween for the arrow
-		local tweenGoal = {Position = newTargetPosition}
-
-		local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
-
-		arrowTween:Play() -- plays the arrow tween
-
-		-- collision detection logic
-		local traveledDistance = 0
 		local connection
 		connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-			-- update traveled distance
 			traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
 
-			-- checks for collisions
-			local raycastResult = workspace:Raycast(arrow.Position, (targetPosition - arrow.Position).Unit * 2) -- Short ray for impact detection
-			
+			if not targetEnemy:FindFirstChild("HumanoidRootPart") then else local raycastResult = workspace:Raycast(arrow.Position, (targetEnemy.HumanoidRootPart.Position - arrow.Position).Unit * 2)
 			if raycastResult then
 				local hitPart = raycastResult.Instance
-
-				-- checks if the hit part is the target enemy or another enemy
 				local hitParent = hitPart.Parent
 				local humanoid = hitParent:FindFirstChild("Humanoid")
 
-				if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
-					
-					table.insert(hittedHumans, humanoid) -- to avoid multiple damage to a single enemy, we insert that humanoid to the table.
-					local rageBonus = 1
-					
-					if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-						
-						rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100 -- if player has 30% or less health, he gets bonus dmg
-						
-					end
-					
-					
-					local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus -- calculate final damage to deal
-					local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
-
-					local letsSee = math.random(1, 100) -- math random calculating a chance for a crit shot
-
-					if doNoclip == false then -- if arrow's collision is turned off, delete the arrow to avoid multiple hits
-						arrow:Destroy()
-						connection:Disconnect()
-						table.clear(hittedHumans)
-					end
-
-					if letsSee <= critVal then
-
-						local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone() -- clonning the "Crit!" effect
-						clone.Name = "Clone"
-						clone.Parent = hitParent.Head.BillboardGui2
-						clone.Position = UDim2.new(0,0,0.5,0)
-						clone.Visible = true
-						dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100) -- the FINAL damage
-						humanoid:TakeDamage(dmg)
-						hitParent.crit_received:Play() -- play the sound of a critical effect
-						TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play() -- a simple tween to move the "Crit!" effect
-						wait(0.9)
-						clone:Destroy()
-					else
-						
-						humanoid:TakeDamage(dmg)
-						
-					end
-				elseif hitParent == workspace.Map.Walls then
-					-- if the arrow hits a wall, it should get destroyed
-					if doNoclip == false then
-						arrow:Destroy()
-						connection:Disconnect()
-						table.clear(hittedHumans)
-					end
-					
+				if hitParent == workspace.Map.Walls and not doNoclip then
+					arrow:Destroy()
+					connection:Disconnect()
 				end
-			elseif traveledDistance >= range.Value then
-				-- destroy the arrow if it exceeds the max range
-				arrow:Destroy()
-				connection:Disconnect()
-				table.clear(hittedHumans)
+
+				if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+					table.insert(hittedHumans, humanoid)
+
+					-- calculate the damage
+					local rageBonus = 1
+					if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+						rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+					end
+
+					local dmg = damage.Value * rageBonus
+					if math.random(1, 100) <= critChance.Value then
+						dmg = dmg * (critDmg.Value / 100)
+					end
+					
+					-- finally, deal the boosted (or not) damage to humanoid
+					humanoid:TakeDamage(dmg)
+
+					if not doNoclip then
+						arrow:Destroy()
+						connection:Disconnect()
+					end
+				end
+			end
 			end
 		end)
-
-		-- automatically destroy the arrow after 5 seconds as a failsafe
-		game:GetService("Debris"):AddItem(arrow, 5)
 	end
 end
 
+-- Main function to fire one arrow
+local function fireArrow1(targetEnemy, player, doNoclip)
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		fire.PlaybackSpeed = math.random(80, 110) / 100
+		fire:Play()
 
--- function for firing two arrows, including setting their target position, cframe and handling the optional
--- collision with enemy/enemies (depends on the arrow collision upgrade), and calculating the damage
--- with base damage (upgrade), optional critical damage and rage boost
+		local arrow = createArrow(doNoclip)
+		local direction, newTargetPosition = calculateTrajectory(arrow.Position, targetEnemy.HumanoidRootPart.Position)
+		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+		moveArrow(arrow, newTargetPosition)
+		handleCollision(arrow, targetEnemy, player, doNoclip)
+	end
+end
+
+-- Main function to fire two arrows
 local function fireArrow2(targetEnemy, player, doNoclip)
 	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
 		fire.PlaybackSpeed = math.random(80, 110) / 100
 		fire:Play()
-		local hittedHumans = {}
 
 		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local direction = (targetPosition - handle.Position).Unit
+		local baseDirection = (targetPosition - handle.Position).Unit
+		local horizontalSpread = 0.03 -- arrow spread
 
-
-		local horizontalSpread = 0.03 -- horizontal spread of the arrows
-
-		-- for loop
+		-- For loop for 2 arrows
 		for i = -1, 1, 2 do
-			
-			local arrow = arrowTemplate:Clone()
-			arrow.CFrame = handle.CFrame
-			arrow.Parent = workspace
-			
-			if doNoclip == true then
-				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902) -- if arrow can noclip, set its color to lime green
-			end
+			local arrow = createArrow(doNoclip)
 
-			
-		local spreadDirection = (direction + Vector3.new(i * horizontalSpread, 0, 0)).Unit
-			
-			-- calculate the distance to the enemy
-			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
+			local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 
-			-- calculate the time required for the arrow to reach the target based on projectile speed
-			local travelTime = distanceToTarget / projectileSpeed.Value / 5
-
-			local trueDistance = distanceToTarget/travelTime*5
+			local distance = (targetPosition - arrow.Position).Magnitude
+			local travelTime = distance / projectileSpeed.Value / 5
+			local trueDistance = distance / travelTime * 5
 
 			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
 
 			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
 
-			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear) -- sets up a new tween for the arrow
-			local tweenGoal = {Position = newTargetPosition}
-
-			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
-
-			arrowTween:Play() -- play the arrow tween
-
-			-- collision detection logic
-			local traveledDistance = 0
-			local connection
-			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-				-- update traveled distance
-				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
-
-				-- checks for collisions
-				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Short ray for impact detection
-
-				if raycastResult then
-					local hitPart = raycastResult.Instance
-
-					-- checks if the hit part is the target enemy or another enemy
-					local hitParent = hitPart.Parent
-					local humanoid = hitParent:FindFirstChild("Humanoid")
-
-					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
-
-						table.insert(hittedHumans, humanoid) -- to avoid multiple damage to a single enemy, we insert that humanoid to the table.
-						local rageBonus = 1
-
-						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-
-							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100 -- if player has 30% or less health, he gets bonus dmg
-
-						end
-
-						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus  -- calculate final damage to deal
-
-						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
-
-						local letsSee = math.random(1, 100) -- math random calculating a chance for a crit shot
-
-						if doNoclip == false then  -- if arrow's collision is turned off, delete the arrow to avoid multiple hits
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-						if letsSee <= critVal then
-
-							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()  -- clonning the "Crit!" effect
-							clone.Name = "Clone"
-							clone.Parent = hitParent.Head.BillboardGui2
-							clone.Position = UDim2.new(0,0,0.5,0)
-							clone.Visible = true
-							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)  -- the FINAL damage
-							humanoid:TakeDamage(dmg)
-							hitParent.crit_received:Play() -- play the sound of a critical effect
-							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play() -- a simple tween to move the "Crit!" effect
-							wait(0.9)
-							clone:Destroy()
-						else
-
-							humanoid:TakeDamage(dmg)
-
-						end
-					elseif hitParent == workspace.Map.Walls then
-						-- if the arrow hits a wall, it should get destroyed
-						if doNoclip == false then
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-					end
-				elseif traveledDistance >= range.Value then
-					-- destroy the arrow if it exceeds the max range
-					arrow:Destroy()
-					connection:Disconnect()
-					table.clear(hittedHumans)
-				end
-			end)
-
-			-- automatically destroy the arrow after 5 seconds as a failsafe
-			game:GetService("Debris"):AddItem(arrow, 5)
+			moveArrow(arrow, newTargetPosition)
+			handleCollision(arrow, targetEnemy, player, doNoclip)
 		end
 	end
 end
 
-
--- function for firing three arrows, including setting their target position, cframe and handling the optional
--- collision with enemy/enemies (depends on the arrow collision upgrade), and calculating the damage
--- with base damage (upgrade), optional critical damage and rage boost
+-- Main function to fire three arrows
 local function fireArrow3(targetEnemy, player, doNoclip)
 	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
 		fire.PlaybackSpeed = math.random(80, 110) / 100
 		fire:Play()
-		local hittedHumans = {}
 
 		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local direction = (targetPosition - handle.Position).Unit
+		local baseDirection = (targetPosition - handle.Position).Unit
+		local horizontalSpread = 0.08 -- arrow spread
 
-
-		local horizontalSpread = 0.1 -- horizontal spread of the arrows
-
-		-- for loop, for 3 arrows
+		-- For loop for 3 arrows
 		for i = -1, 1 do
-			-- Klonowanie strzały i ustawienie jej przy uchwycie
-			local arrow = arrowTemplate:Clone()
-			arrow.CFrame = handle.CFrame
-			arrow.Parent = workspace
-			
-			if doNoclip == true then
-				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902) -- if arrow can noclip, set its color to lime green
-			end
-			
+			local arrow = createArrow(doNoclip)
 			local spreadDirection
+
 			if i == 0 then
-				spreadDirection = direction -- mittle arrow goes straight forward
+				spreadDirection = baseDirection
 			else
-				spreadDirection = (direction + Vector3.new(i * horizontalSpread, 0, 0)).Unit -- left & right arrow, with a little spread
+				spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 			end
 
-			-- calculate the distance to the enemy
-			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
-
-			-- calculate the time required for the arrow to reach the target based on projectile speed
-			local travelTime = distanceToTarget / projectileSpeed.Value / 5
-
-			local trueDistance = distanceToTarget/travelTime*5
+			local distance = (targetPosition - arrow.Position).Magnitude
+			local travelTime = distance / projectileSpeed.Value / 5
+			local trueDistance = distance / travelTime * 5
 
 			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
 
 			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
 
-			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear) -- sets up a new tween for the arrow
-			local tweenGoal = {Position = newTargetPosition}
-
-			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
-
-			arrowTween:Play() -- play the arrow tween
-
-			-- collision detection logic
-			local traveledDistance = 0
-			local connection
-			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-				-- update traveled distance
-				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
-
-				-- checks for collisions
-				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Krótki promień do wykrywania kolizji
-
-				if raycastResult then
-					local hitPart = raycastResult.Instance
-
-					-- check if the hit part is the target enemy or another enemy
-					local hitParent = hitPart.Parent
-					local humanoid = hitParent:FindFirstChild("Humanoid")
-
-					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
-				
-						table.insert(hittedHumans, humanoid) -- to avoid multiple damage to a single enemy, we insert that humanoid to the table.
-						local rageBonus = 1
-
-						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-
-							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100 -- if player has 30% or less health, he gets bonus dmg
-
-						end
-
-						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus -- calculate final damage to deal
-
-						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
-
-						local letsSee = math.random(1, 100) -- math random calculating a chance for a crit shot
-
-						if doNoclip == false then -- if arrow's collision is turned off, delete the arrow to avoid multiple hits
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-						if letsSee <= critVal then
-
-							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone()  -- clonning the "Crit!" effect
-							clone.Name = "Clone"
-							clone.Parent = hitParent.Head.BillboardGui2
-							clone.Position = UDim2.new(0,0,0.5,0)
-							clone.Visible = true
-							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)  -- the FINAL damage
-							humanoid:TakeDamage(dmg)
-							hitParent.crit_received:Play() -- play the sound of a critical effect
-							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play() -- a simple tween to move the "Crit!" effect
-							wait(0.9)
-							clone:Destroy()
-						else
-
-							humanoid:TakeDamage(dmg)
-
-						end
-					elseif hitParent == workspace.Map.Walls then
-						-- if the arrow hits a wall, it should get destroyed
-						if doNoclip == false then
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-					end
-				elseif traveledDistance >= range.Value then
-					-- destroy the arrow if it exceeds the max range
-					arrow:Destroy()
-					connection:Disconnect()
-					table.clear(hittedHumans)
-				end
-			end)
-
-			-- automatically destroy the arrow after 5 seconds as a failsafe
-			game:GetService("Debris"):AddItem(arrow, 5)
+			moveArrow(arrow, newTargetPosition)
+			handleCollision(arrow, targetEnemy, player, doNoclip)
 		end
 	end
 end
 
--- function for firing four arrows, including setting their target position, cframe and handling the optional
--- collision with enemy/enemies (depends on the arrow collision upgrade), and calculating the damage
--- with base damage (upgrade), optional critical damage and rage boost
+-- Main function to fire four arrows
 local function fireArrow4(targetEnemy, player, doNoclip)
 	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
 		fire.PlaybackSpeed = math.random(80, 110) / 100
 		fire:Play()
-		local hittedHumans = {}
-		
+
 		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local direction = (targetPosition - handle.Position).Unit
+		local baseDirection = (targetPosition - handle.Position).Unit
+		local horizontalSpread = 0.08 -- arrow spread
+		
+		-- For loop for 4 arrows
+		for i = -1.5, 1.5, 1 do
+			local arrow = createArrow(doNoclip)
+			local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 
-		local horizontalSpread = 0.15 -- horizontal spread of the arrows
-
-		local spreadOffsets = {-1.5, -0.5, 0.5, 1.5} -- custom spread, since its hard to just use a basic for function here
-
-		-- for loop for 4 arrows, using custom spread offets
-		for _, offset in ipairs(spreadOffsets) do
-			
-			local arrow = arrowTemplate:Clone()
-			arrow.CFrame = handle.CFrame
-			arrow.Parent = workspace
-			
-			if doNoclip == true then
-				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902) -- if arrow can noclip, set its color to lime green
-			end
-
-			
-			local spreadDirection = (direction + Vector3.new(offset * horizontalSpread, 0, 0)).Unit
-			
-			-- Skorygowanie kierunku dla rozdzielenia na boki (horyzontalnie)
-			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
-
-			-- calculate the time required for the arrow to reach the target based on projectile speed
-			local travelTime = distanceToTarget / projectileSpeed.Value / 5
-
-			local trueDistance = distanceToTarget/travelTime*5
+			local distance = (targetPosition - arrow.Position).Magnitude
+			local travelTime = distance / projectileSpeed.Value / 5
+			local trueDistance = distance / travelTime * 5
 
 			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
 
 			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
 
-			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear)  -- sets up a new tween for the arrow
-			local tweenGoal = {Position = newTargetPosition}
-
-			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
-
-			arrowTween:Play()  -- play the arrow tween
-
-			-- collision detection logic
-			local traveledDistance = 0
-			local connection
-			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-				-- update traveled distance
-				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
-
-				-- checks for collisions
-				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Short ray for impact detection
-
-				if raycastResult then
-					local hitPart = raycastResult.Instance
-
-					-- checks if the hit part is the target enemy or another enemy
-					local hitParent = hitPart.Parent
-					local humanoid = hitParent:FindFirstChild("Humanoid")
-
-					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
-						
-						table.insert(hittedHumans, humanoid) -- to avoid multiple damage to a single enemy, we insert that humanoid to the table.
-						local rageBonus = 1
-
-						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-
-							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100 -- if player has 30% or less health, he gets bonus dmg
-
-						end
-
-						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus -- calculate final damage to deal
-
-						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
-
-						local letsSee = math.random(1, 100) -- math random calculating a chance for a crit shot
-
-
-						if doNoclip == false then -- if arrow's collision is turned off, delete the arrow to avoid multiple hits
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-						if letsSee <= critVal then
-
-							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone() -- clonning the "Crit!" effect
-							clone.Name = "Clone"
-							clone.Parent = hitParent.Head.BillboardGui2
-							clone.Position = UDim2.new(0,0,0.5,0)
-							clone.Visible = true
-							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100)  -- the FINAL damage
-							humanoid:TakeDamage(dmg)
-							hitParent.crit_received:Play() -- play the sound of a critical effect
-							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play()-- a simple tween to move the "Crit!" effect
-							wait(0.9)
-							clone:Destroy()
-						else
-
-							humanoid:TakeDamage(dmg)
-
-						end
-					elseif hitParent == workspace.Map.Walls then
-						-- if the arrow hits a wall, it should get destroyed
-						if doNoclip == false then
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-					end
-				elseif traveledDistance >= range.Value then
-					-- destroy the arrow if it exceeds the max range
-					arrow:Destroy()
-					connection:Disconnect()
-					table.clear(hittedHumans)
-				end
-			end)
-
-			-- automatically destroy the arrow after 5 seconds as a failsafe
-			game:GetService("Debris"):AddItem(arrow, 5)
+			moveArrow(arrow, newTargetPosition)
+			handleCollision(arrow, targetEnemy, player, doNoclip)
 		end
 	end
 end
 
-
--- function for firing five arrows, including setting their target position, cframe and handling the optional
--- collision with enemy/enemies (depends on the arrow collision upgrade), and calculating the damage
--- with base damage (upgrade), optional critical damage and rage boost
+-- Main function to fire five arrows
 local function fireArrow5(targetEnemy, player, doNoclip)
 	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
 		fire.PlaybackSpeed = math.random(80, 110) / 100
 		fire:Play()
-		local hittedHumans = {}
 
 		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local direction = (targetPosition - handle.Position).Unit
+		local baseDirection = (targetPosition - handle.Position).Unit
+		local horizontalSpread = 0.2
 
-
-		local horizontalSpread = 0.15 -- horizontal spread of the arrows
-
-		-- for loop for 5 arrows
+		-- For loop for 5 arrows
 		for i = -2, 2 do
-			
-			local arrow = arrowTemplate:Clone()
-			arrow.CFrame = handle.CFrame
-			arrow.Parent = workspace
-			
-			if doNoclip == true then
-				arrow.Highlight.OutlineColor = Color3.new(0.466667, 0.854902, 0.054902) -- if arrow can noclip, set its color to lime green
-			end
-			
-			local spreadDirection
-			if i == 0 then
-				spreadDirection = direction -- middle arrow goes straight forward
-			else
-				spreadDirection = (direction + Vector3.new(i * horizontalSpread, 0, 0)).Unit -- side arrows
-			end
+			local arrow = createArrow(doNoclip)
+			local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 
-			-- calculate the distance to the enemy
-			local distanceToTarget = (targetPosition - arrow.Position).Magnitude
-
-			-- calculate the time required for the arrow to reach the target based on projectile speed
-			local travelTime = distanceToTarget / projectileSpeed.Value / 5
-
-			local trueDistance = distanceToTarget/travelTime*5
+			local distance = (targetPosition - arrow.Position).Magnitude
+			local travelTime = distance / projectileSpeed.Value / 5
+			local trueDistance = distance / travelTime * 5
 
 			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
 
 			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
 
-			local tweenInfo = TweenInfo.new(5, Enum.EasingStyle.Linear) -- sets up a new tween for the arrow
-			local tweenGoal = {Position = newTargetPosition}
-
-			local arrowTween = TweenService:Create(arrow, tweenInfo, tweenGoal)
-
-			arrowTween:Play()  -- play the arrow tween
-
-			-- collision detection logic
-			local traveledDistance = 0
-			local connection
-			connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-				-- update traveled distance
-				traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
-
-				-- checks for collisions
-				local raycastResult = workspace:Raycast(arrow.Position, spreadDirection * 2) -- Short ray for impact detection
-
-
-				if raycastResult then
-					local hitPart = raycastResult.Instance
-
-					-- checks if the hit part is the target enemy or another enemy
-					local hitParent = hitPart.Parent
-					local humanoid = hitParent:FindFirstChild("Humanoid")
-
-					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
-
-						table.insert(hittedHumans, humanoid) -- to avoid multiple damage to a single enemy, we insert that humanoid to the table.
-						local rageBonus = 1
-
-						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-
-							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100 -- if player has 30% or less health, he gets bonus dmg
-
-						end
-
-						local dmg = damage.Value * (1 + (upgrades[1].Increase * upgrades[1].PlayerHas) / 100) * rageBonus -- calculate final damage to deal
-
-						local critVal = critChance.Value + (upgrades[4].Increase * upgrades[4].PlayerHas)
-
-						local letsSee = math.random(1, 100) -- math random calculating a chance for a crit shot
-
-						if doNoclip == false then -- if arrow's collision is turned off, delete the arrow to avoid multiple hits
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-						if letsSee <= critVal then
-
-							local clone = hitParent.Head.BillboardGui2.ImageLabel:Clone() -- clonning the "Crit!" effect
-							clone.Name = "Clone"
-							clone.Parent = hitParent.Head.BillboardGui2
-							clone.Position = UDim2.new(0,0,0.5,0)
-							clone.Visible = true
-							
-							dmg *= (1 + (critDmg.Value + upgrades[5].Increase * upgrades[5].PlayerHas) / 100) -- the FINAL damage
-							humanoid:TakeDamage(dmg)
-							hitParent.crit_received:Play() -- play the sound of a critical effect
-							TweenService:Create(clone, tweenInfo, {Position = UDim2.new(0,0,0.1,0)}):Play() -- a simple tween to move the "Crit!" effect
-							wait(0.9)
-							clone:Destroy()
-						else
-
-							humanoid:TakeDamage(dmg)
-
-						end
-					elseif hitParent == workspace.Map.Walls then
-						-- if the arrow hits a wall, it should get destroyed
-						if doNoclip == false then
-							arrow:Destroy()
-							connection:Disconnect()
-							table.clear(hittedHumans)
-						end
-
-					end
-				elseif traveledDistance >= range.Value then
-					-- destroy the arrow if it exceeds the max range
-					arrow:Destroy()
-					connection:Disconnect()
-					table.clear(hittedHumans)
-				end
-			end)
-
-			-- automatically destroy the arrow after 5 seconds as a failsafe
-			game:GetService("Debris"):AddItem(arrow, 5)
+			moveArrow(arrow, newTargetPosition)
+			handleCollision(arrow, targetEnemy, player, doNoclip)
 		end
 	end
 end
 
-
--- repeats the shooting process
-while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do -- wait the cooldown
+-- Main loop
+while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do
 	local player = game.Players:GetPlayerFromCharacter(tool.Parent) -- get player
 
 	if player then
 		local closestEnemy = findClosestEnemy(player) -- firing the function to find the closest enemy
 		if closestEnemy then
-			
+
 			local doNoclip = false
-			
+
 			if upgrades[16].PlayerHas > 0 then
-				
+
 				local randomNumb = math.random(1,100)
 				print(randomNumb, upgrades[16].PlayerHas * upgrades[16].Increase)
-				
+
 				if randomNumb <= upgrades[16].PlayerHas * upgrades[16].Increase then 
-					
+
 					doNoclip = true -- if player has the projectile collision upgrade, there's a chance for the arrow to pass through things, and even hit multiple enemies at once!
-					
 				end
-				
+
 			end
-			
+
 			local projectileNumber = projectiles.Value + upgrades[7].PlayerHas -- get number of projectiles that will be launched
-			
+
 			if projectileNumber == 1 then
 
 				fireArrow1(closestEnemy, player, doNoclip)
@@ -756,13 +319,14 @@ while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) 
 			elseif projectileNumber == 5 then
 
 				fireArrow5(closestEnemy, player, doNoclip)
-			
+
 			else
-				
+
 				warn("Invalid number of projectiles detected!") -- in case of some reason the number of projectiles is not valid (not between 1-5)
-			
+
 			end
 
 		end
 	end
+	
 end
