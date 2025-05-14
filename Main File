@@ -38,18 +38,22 @@ local function findClosestEnemy(player)
 
 
 	for _, enemy in pairs(enemiesFolder:GetChildren()) do -- goes through every enemy in the Enemies folder
-		if enemy:FindFirstChild("HumanoidRootPart") then
-			local humanoid = enemy:FindFirstChild("Humanoid")
+		if not enemy:FindFirstChild("HumanoidRootPart") then
+			return
+		end
+		
+		local humanoid = enemy:FindFirstChild("Humanoid")
 
-			if humanoid and humanoid.Health > 0 then-- checks, if there's a humanoid and if its alive
-				local enemyPosition = enemy.HumanoidRootPart.Position
-				local distance = (enemyPosition - handle.Position).Magnitude
+		if not humanoid or humanoid.Health <= 0 then-- checks, if there's a humanoid and if its alive
+			return
+		end
+		
+		local enemyPosition = enemy.HumanoidRootPart.Position
+		local distance = (enemyPosition - handle.Position).Magnitude
 
-				if distance < shortestDistance then -- checks, if the distance to the enemy is smaller than distance to the closest enemy yet
-					closestEnemy = enemy -- sets closest enemy to the (new) enemy with the shortest distance
-					shortestDistance = distance -- sets the shortest distance to the distance of the (new) closest enemy
-				end
-			end
+		if distance < shortestDistance then -- checks, if the distance to the enemy is smaller than distance to the closest enemy yet
+			closestEnemy = enemy -- sets closest enemy to the (new) enemy with the shortest distance
+			shortestDistance = distance -- sets the shortest distance to the distance of the (new) closest enemy
 		end
 	end
 
@@ -94,58 +98,100 @@ local function handleCollision(arrow, targetEnemy, player, doNoclip)
 	local hittedHumans = {}
 	local traveledDistance = 0
 
-	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		local connection
-		connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-			traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
-
-			if not targetEnemy:FindFirstChild("HumanoidRootPart") then else local raycastResult = workspace:Raycast(arrow.Position, (targetEnemy.HumanoidRootPart.Position - arrow.Position).Unit * 2)
-			if raycastResult then
-				local hitPart = raycastResult.Instance
-				local hitParent = hitPart.Parent
-				local humanoid = hitParent:FindFirstChild("Humanoid")
-
-				if hitParent == workspace.Map.Walls and not doNoclip then
-					arrow:Destroy()
-					connection:Disconnect()
-				end
-
-				if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
-					table.insert(hittedHumans, humanoid)
-
-					-- calculate the damage
-					local rageBonus = 1
-					if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-						rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
-					end
-
-					local dmg = damage.Value * rageBonus
-					if math.random(1, 100) <= critChance.Value then
-						dmg = dmg * (critDmg.Value / 100)
-					end
-					
-					-- finally, deal the boosted (or not) damage to humanoid
-					humanoid:TakeDamage(dmg)
-
-					if not doNoclip then
-						arrow:Destroy()
-						connection:Disconnect()
-					end
-				end
-			end
-			end
-		end)
+	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
+		return
 	end
+	
+	local connection
+	connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+		traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+		-- it has to be in the same line, since i couldn't denest this condition, since sometimes the script would break
+		if targetEnemy:FindFirstChild("HumanoidRootPart") then local raycastResult = workspace:Raycast(arrow.Position, (targetEnemy.HumanoidRootPart.Position - arrow.Position).Unit * 2)
+			
+			if not raycastResult then
+				return
+			end
+			
+			local hitPart = raycastResult.Instance
+			local hitParent = hitPart.Parent
+			local humanoid = hitParent:FindFirstChild("Humanoid")
+
+			if hitParent == workspace.Map.Walls and not doNoclip then
+				arrow:Destroy()
+				connection:Disconnect()
+			end
+
+			if not humanoid or humanoid.Health <= 0 or hitParent == player.Character or table.find(hittedHumans, humanoid) then
+				return
+			end
+			
+			table.insert(hittedHumans, humanoid)
+
+			-- calculate the damage
+			local rageBonus = 1
+			if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+				rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+			end
+
+			local dmg = damage.Value * rageBonus
+			if math.random(1, 100) <= critChance.Value then
+				dmg = dmg * (critDmg.Value / 100)
+			end
+
+			-- finally, deal the boosted (or not) damage to humanoid
+			humanoid:TakeDamage(dmg)
+
+			if not doNoclip then
+				arrow:Destroy()
+				connection:Disconnect()
+			end
+		end
+	end)
 end
 
 -- Main function to fire one arrow
 local function fireArrow1(targetEnemy, player, doNoclip)
-	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		fire.PlaybackSpeed = math.random(80, 110) / 100
-		fire:Play()
+	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+	
+	fire.PlaybackSpeed = math.random(80, 110) / 100
+	fire:Play()
 
+	local arrow = createArrow(doNoclip)
+	local direction, newTargetPosition = calculateTrajectory(arrow.Position, targetEnemy.HumanoidRootPart.Position)
+	arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+	moveArrow(arrow, newTargetPosition)
+	handleCollision(arrow, targetEnemy, player, doNoclip)
+end
+
+-- Main function to fire two arrows
+local function fireArrow2(targetEnemy, player, doNoclip)
+	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+	
+	fire.PlaybackSpeed = math.random(80, 110) / 100
+	fire:Play()
+
+	local targetPosition = targetEnemy.HumanoidRootPart.Position
+	local baseDirection = (targetPosition - handle.Position).Unit
+	local horizontalSpread = 0.03 -- arrow spread
+
+	-- For loop for 2 arrows
+	for i = -1, 1, 2 do
 		local arrow = createArrow(doNoclip)
-		local direction, newTargetPosition = calculateTrajectory(arrow.Position, targetEnemy.HumanoidRootPart.Position)
+
+		local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
+
+		local distance = (targetPosition - arrow.Position).Magnitude
+		local travelTime = distance / projectileSpeed.Value / 5
+		local trueDistance = distance / travelTime * 5
+
+		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+
 		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
 
 		moveArrow(arrow, newTargetPosition)
@@ -153,126 +199,102 @@ local function fireArrow1(targetEnemy, player, doNoclip)
 	end
 end
 
--- Main function to fire two arrows
-local function fireArrow2(targetEnemy, player, doNoclip)
-	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		fire.PlaybackSpeed = math.random(80, 110) / 100
-		fire:Play()
-
-		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local baseDirection = (targetPosition - handle.Position).Unit
-		local horizontalSpread = 0.03 -- arrow spread
-
-		-- For loop for 2 arrows
-		for i = -1, 1, 2 do
-			local arrow = createArrow(doNoclip)
-
-			local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
-
-			local distance = (targetPosition - arrow.Position).Magnitude
-			local travelTime = distance / projectileSpeed.Value / 5
-			local trueDistance = distance / travelTime * 5
-
-			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
-
-			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-			moveArrow(arrow, newTargetPosition)
-			handleCollision(arrow, targetEnemy, player, doNoclip)
-		end
-	end
-end
-
 -- Main function to fire three arrows
 local function fireArrow3(targetEnemy, player, doNoclip)
-	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		fire.PlaybackSpeed = math.random(80, 110) / 100
-		fire:Play()
+	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+	
+	fire.PlaybackSpeed = math.random(80, 110) / 100
+	fire:Play()
 
-		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local baseDirection = (targetPosition - handle.Position).Unit
-		local horizontalSpread = 0.08 -- arrow spread
+	local targetPosition = targetEnemy.HumanoidRootPart.Position
+	local baseDirection = (targetPosition - handle.Position).Unit
+	local horizontalSpread = 0.08 -- arrow spread
 
-		-- For loop for 3 arrows
-		for i = -1, 1 do
-			local arrow = createArrow(doNoclip)
-			local spreadDirection
+	-- For loop for 3 arrows
+	for i = -1, 1 do
+		local arrow = createArrow(doNoclip)
+		local spreadDirection
 
-			if i == 0 then
-				spreadDirection = baseDirection
-			else
-				spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
-			end
-
-			local distance = (targetPosition - arrow.Position).Magnitude
-			local travelTime = distance / projectileSpeed.Value / 5
-			local trueDistance = distance / travelTime * 5
-
-			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
-
-			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-			moveArrow(arrow, newTargetPosition)
-			handleCollision(arrow, targetEnemy, player, doNoclip)
+		if i == 0 then
+			spreadDirection = baseDirection
+		else
+			spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 		end
+
+		local distance = (targetPosition - arrow.Position).Magnitude
+		local travelTime = distance / projectileSpeed.Value / 5
+		local trueDistance = distance / travelTime * 5
+
+		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+
+		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+		moveArrow(arrow, newTargetPosition)
+		handleCollision(arrow, targetEnemy, player, doNoclip)
 	end
 end
 
 -- Main function to fire four arrows
 local function fireArrow4(targetEnemy, player, doNoclip)
-	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		fire.PlaybackSpeed = math.random(80, 110) / 100
-		fire:Play()
+	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+	
+	fire.PlaybackSpeed = math.random(80, 110) / 100
+	fire:Play()
 
-		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local baseDirection = (targetPosition - handle.Position).Unit
-		local horizontalSpread = 0.08 -- arrow spread
-		
-		-- For loop for 4 arrows
-		for i = -1.5, 1.5, 1 do
-			local arrow = createArrow(doNoclip)
-			local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
+	local targetPosition = targetEnemy.HumanoidRootPart.Position
+	local baseDirection = (targetPosition - handle.Position).Unit
+	local horizontalSpread = 0.08 -- arrow spread
 
-			local distance = (targetPosition - arrow.Position).Magnitude
-			local travelTime = distance / projectileSpeed.Value / 5
-			local trueDistance = distance / travelTime * 5
+	-- For loop for 4 arrows
+	for i = -1.5, 1.5, 1 do
+		local arrow = createArrow(doNoclip)
+		local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 
-			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+		local distance = (targetPosition - arrow.Position).Magnitude
+		local travelTime = distance / projectileSpeed.Value / 5
+		local trueDistance = distance / travelTime * 5
 
-			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
 
-			moveArrow(arrow, newTargetPosition)
-			handleCollision(arrow, targetEnemy, player, doNoclip)
-		end
+		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+
+		moveArrow(arrow, newTargetPosition)
+		handleCollision(arrow, targetEnemy, player, doNoclip)
 	end
 end
 
 -- Main function to fire five arrows
 local function fireArrow5(targetEnemy, player, doNoclip)
-	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
-		fire.PlaybackSpeed = math.random(80, 110) / 100
-		fire:Play()
+	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+	
+	fire.PlaybackSpeed = math.random(80, 110) / 100
+	fire:Play()
 
-		local targetPosition = targetEnemy.HumanoidRootPart.Position
-		local baseDirection = (targetPosition - handle.Position).Unit
-		local horizontalSpread = 0.2
+	local targetPosition = targetEnemy.HumanoidRootPart.Position
+	local baseDirection = (targetPosition - handle.Position).Unit
+	local horizontalSpread = 0.2
 
-		-- For loop for 5 arrows
-		for i = -2, 2 do
-			local arrow = createArrow(doNoclip)
-			local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
+	-- For loop for 5 arrows
+	for i = -2, 2 do
+		local arrow = createArrow(doNoclip)
+		local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 
-			local distance = (targetPosition - arrow.Position).Magnitude
-			local travelTime = distance / projectileSpeed.Value / 5
-			local trueDistance = distance / travelTime * 5
+		local distance = (targetPosition - arrow.Position).Magnitude
+		local travelTime = distance / projectileSpeed.Value / 5
+		local trueDistance = distance / travelTime * 5
 
-			local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
+		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
 
-			arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
+		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
 
-			moveArrow(arrow, newTargetPosition)
-			handleCollision(arrow, targetEnemy, player, doNoclip)
-		end
+		moveArrow(arrow, newTargetPosition)
+		handleCollision(arrow, targetEnemy, player, doNoclip)
 	end
 end
 
@@ -280,53 +302,42 @@ end
 while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do
 	local player = game.Players:GetPlayerFromCharacter(tool.Parent) -- get player
 
-	if player then
-		local closestEnemy = findClosestEnemy(player) -- firing the function to find the closest enemy
-		if closestEnemy then
-
-			local doNoclip = false
-
-			if upgrades[16].PlayerHas > 0 then
-
-				local randomNumb = math.random(1,100)
-				print(randomNumb, upgrades[16].PlayerHas * upgrades[16].Increase)
-
-				if randomNumb <= upgrades[16].PlayerHas * upgrades[16].Increase then 
-
-					doNoclip = true -- if player has the projectile collision upgrade, there's a chance for the arrow to pass through things, and even hit multiple enemies at once!
-				end
-
-			end
-
-			local projectileNumber = projectiles.Value + upgrades[7].PlayerHas -- get number of projectiles that will be launched
-
-			if projectileNumber == 1 then
-
-				fireArrow1(closestEnemy, player, doNoclip)
-
-			elseif projectileNumber == 2 then
-
-				fireArrow2(closestEnemy, player, doNoclip)
-
-			elseif projectileNumber == 3 then
-
-				fireArrow3(closestEnemy, player, doNoclip)
-
-			elseif projectileNumber == 4 then
-
-				fireArrow4(closestEnemy, player, doNoclip)
-
-			elseif projectileNumber == 5 then
-
-				fireArrow5(closestEnemy, player, doNoclip)
-
-			else
-
-				warn("Invalid number of projectiles detected!") -- in case of some reason the number of projectiles is not valid (not between 1-5)
-
-			end
-
-		end
+	if not player then
+		return
 	end
 	
+	local closestEnemy = findClosestEnemy(player) -- firing the function to find the closest enemy
+	if not closestEnemy then
+		return	
+	end
+	
+	local doNoclip = false
+
+	if upgrades[16].PlayerHas > 0 then
+
+		local randomNumb = math.random(1,100)
+		print(randomNumb, upgrades[16].PlayerHas * upgrades[16].Increase)
+
+		if randomNumb <= upgrades[16].PlayerHas * upgrades[16].Increase then 
+
+			doNoclip = true -- if player has the projectile collision upgrade, there's a chance for the arrow to pass through things, and even hit multiple enemies at once!
+		end
+
+	end
+
+	local projectileNumber = projectiles.Value + upgrades[7].PlayerHas -- get number of projectiles that will be launched
+
+	if projectileNumber == 1 then
+		fireArrow1(closestEnemy, player, doNoclip)
+	elseif projectileNumber == 2 then
+		fireArrow2(closestEnemy, player, doNoclip)
+	elseif projectileNumber == 3 then
+		fireArrow3(closestEnemy, player, doNoclip)
+	elseif projectileNumber == 4 then
+		fireArrow4(closestEnemy, player, doNoclip)
+	elseif projectileNumber == 5 then
+		fireArrow5(closestEnemy, player, doNoclip)
+	else
+		warn("Invalid number of projectiles detected!") -- in case of some reason the number of projectiles is not valid (not between 1-5)
+	end
 end
