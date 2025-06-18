@@ -565,7 +565,7 @@ while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) 
 
 	local closestEnemy = findClosestEnemy(player) -- firing the function to find the closest enemy
 	if not closestEnemy then
-		return	
+		continue	
 	end
 
 	local doNoclip = false
