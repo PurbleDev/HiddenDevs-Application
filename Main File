@@ -1,149 +1,39 @@
 --[[ Originally made by Purble_Dev
 Discord: @purbledev
-Date: 18.06.2025
+Date: 10.05.2025
 Enjoy!
 
 QUICK HEADS UP:
-This script is making everything work; from upgrades, through enemies spawning to taking care of 'em with your bow,
+This script is for taking care of enemies with your bow,
 you can see how the script works in this game:
 https://www.roblox.com/games/72409643525900/Idle-gamer
 ]]--
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local handler = require(game.ServerScriptService.Handler)
 local upgrades = handler.upgradesList
 
-local weapon, fireRate, range, damage, projectileSpeed, projectiles, critChance, critDmg, handle, fire
+local tool = script.Parent
+local fireRate = tool:WaitForChild("FireRate")
+local range = tool:WaitForChild("Range")
+local damage = tool:WaitForChild("Damage")
+local projectileSpeed = tool:WaitForChild("ProjectileSpeed")
+local projectiles = tool:WaitForChild("Projectiles")
+local critChance = tool:WaitForChild("CriticalChance")
+local critDmg = tool:WaitForChild("CriticalDamage")
+local handle = tool:WaitForChild("Handle")
+local fire = tool:WaitForChild("Fire")
+local playerState = tool:WaitForChild("PlayerState")
 
 local enemiesFolder = workspace:WaitForChild("Enemies")
 local serverStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
 local arrowTemplate = serverStorage.Projectiles:WaitForChild("Arrow")
 
+local originalPlayer
+
 local lastShotTime = 0
 local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 
--- function to apply chosen upgrade/s
-local function applyUpgrade(player, selectedUpgrade) 
-
-	if not upgrades[selectedUpgrade] or upgrades[selectedUpgrade].MaxLevel <= upgrades[selectedUpgrade].PlayerHas then
-		return
-	end
-
-	upgrades[selectedUpgrade].PlayerHas += 1
-
-	if upgrades[selectedUpgrade] == upgrades[8] then -- extra health upgrade
-
-		if player.Character then local befor = player.Character.Humanoid.MaxHealth player.Character.Humanoid.MaxHealth = (1 + upgrades[selectedUpgrade].Increase * upgrades[selectedUpgrade].PlayerHas/100) * player.Settings.StartHealth.Value
-			player.Character.Humanoid.Health *= player.Character.Humanoid.MaxHealth/befor 
-		end
-
-	end
-
-end
-
-
-
-local requestUpgradeSelection = ReplicatedStorage.Upgrades:WaitForChild("RequestUpgradeSelection")
-
--- function to choose 3 upgrades
-local function selectUpgrades(player)
-
-	print("Selecting upgrades!")
-	local availableUpgrades = {}
-	local upgradeIndices = {} -- table to store indices of available upgrades
-
-	-- checks if player has maxed out an upgrade, if not, add to available upgrades
-	for i, upgrade in pairs(upgrades) do
-		if upgrade.PlayerHas < upgrade.MaxLevel then
-			table.insert(availableUpgrades, upgrade)
-			table.insert(upgradeIndices, i)
-		end
-	end
-
-	local selectedUpgrades = {}
-	local selectedUpgradeDetails = {}
-
-	-- choose 3 random upgrades
-	for i = 1, 3 do
-		if #availableUpgrades > 0 then
-			local randomIndex = math.random(1, #availableUpgrades)
-			local selectedUpgrade = availableUpgrades[randomIndex]
-			local selectedIndex = upgradeIndices[randomIndex]
-
-			table.insert(selectedUpgrades, selectedUpgrade)
-			table.insert(selectedUpgradeDetails, {index = selectedIndex, details = selectedUpgrade})
-
-			table.remove(availableUpgrades, randomIndex)
-			table.remove(upgradeIndices, randomIndex)
-		end
-	end
-
-	print(selectedUpgradeDetails)
-
-	applyUpgrade(player, requestUpgradeSelection:InvokeClient(player, selectedUpgradeDetails))
-	-- invoking a remote event with 3 upgrades, and waiting for client to choose one
-
-
-end
-
--- function to handle player joining
-game.Players.PlayerAdded:Connect(function (plr)
-	local folder = script.Settings:Clone()
-	folder.Parent = plr
-
-	local XP = folder:WaitForChild("XP")
-	local startLevelXP = 200 -- starting xp
-	local level = folder:WaitForChild("Level")
-	local xpToGet = startLevelXP
-
-	local function updateLevel() -- leveling system
-		while XP.Value >= xpToGet do
-			XP.Value = XP.Value - xpToGet
-			level.Value += 1
-
-			xpToGet = math.round(startLevelXP * (1.2 ^ (level.Value - 1))) 
-			-- every level you'll need 1.2x more xp to lvl up
-		end
-	end
-
-	-- update the lvl when XP value changes
-	XP.Changed:Connect(function()
-		updateLevel()
-	end)
-
-	plr.CharacterAdded:Connect(function()
-		local tool = folder.Weapon.Value
-		print("trying to add")
-		if tool then
-			print("tool added")
-			local clone = tool:Clone()
-			clone.Parent = plr.Character
-			weapon = clone
-			
-			fireRate = weapon:WaitForChild("FireRate")
-			range = weapon:WaitForChild("Range")
-			damage = weapon:WaitForChild("Damage")
-			projectileSpeed = weapon:WaitForChild("ProjectileSpeed")
-			projectiles = weapon:WaitForChild("Projectiles")
-			critChance = weapon:WaitForChild("CriticalChance")
-			critDmg = weapon:WaitForChild("CriticalDamage")
-			handle = weapon:WaitForChild("Handle")
-			fire = weapon:WaitForChild("Fire")
-		end
-
-		plr.Character.Humanoid.MaxHealth = (1 + upgrades[8].Increase * upgrades[8].PlayerHas/100) * plr.Settings.StartHealth.Value
-		plr.Character.Humanoid.Health = (1 + upgrades[8].Increase * upgrades[8].PlayerHas/100) * plr.Settings.StartHealth.Value
-		plr.Character:FindFirstChild("ForceField"):Destroy()
-		for _, v in ipairs(plr.Character:GetDescendants()) do
-			if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("UnionOperation") then
-				v.CollisionGroup = "Player"
-			end
-		end
-	end)
-
-end)
 
 -- function to create xp orbs
 function makeOrbs(number, pos)
@@ -209,84 +99,30 @@ workspace.HealGems.ChildAdded:Connect(function(healGem)
 	end)
 end)
 
-wait(4) -- wait for player to load
-
-
--- function to spawn enemies
-local function spawnEnemy(enemyType, spawnAmount, delayTime)
-	for i = 1, spawnAmount do
-		wait(delayTime)
-		local plr = game.Players:FindFirstChildOfClass("Player")
-		local clone = game.ServerStorage[enemyType]:Clone()
-		clone.Parent = workspace.Enemies
-
-		local spawns = workspace.Map.MonsterSpawns:GetChildren()
-
-		local chosenSpawn = spawns[math.random(1, #spawns)] -- choose a random spawn for the monster
-
-		clone:MoveTo(chosenSpawn.Position)
-
-		clone.Humanoid.Died:Connect(function() -- when enemy dies, make xp orbs and (eventually) heal gems
-			workspace.Settings.Info.Value = "Enemy "..enemyType.." died!"
+-- Function to handle enemy death, so you can get XP orbs and optional HP gems
+local function setupEnemy(enemy)
+	if enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("HumanoidRootPart") and enemy:FindFirstChild("XP") then
+		enemy.Humanoid.Died:Connect(function()
+			workspace.Settings.Info.Value = "Enemy "..enemy.Name.." died!"
 			wait(1)
 			workspace.Settings.Info.Value = ""
 
 			local hmm = math.random(1,30)
 			if hmm <= (1 + upgrades[14].Increase * upgrades[14].PlayerHas) then
-
-				makeHealGems(2, clone.HumanoidRootPart.Position)
-
+				makeHealGems(2, enemy.HumanoidRootPart.Position)
 			end
 
-			if plr.Character then plr.Character.Humanoid.Health += (upgrades[12].Increase * upgrades[12].PlayerHas)/100 * plr.Character.Humanoid.MaxHealth end
-			makeOrbs(clone.XP.Value, clone.HumanoidRootPart.Position)
+			if originalPlayer.Character then
+				originalPlayer.Character.Humanoid.Health += (upgrades[12].Increase * upgrades[12].PlayerHas)/100 * originalPlayer.Character.Humanoid.MaxHealth
+			end
+
+			makeOrbs(enemy.XP.Value, enemy.HumanoidRootPart.Position)
 			wait(.5)
-			clone:Destroy()
+			enemy:Destroy()
 		end)
 	end
 end
 
--- function which waits for every enemy to be dead
-local function allEnemiesDefeated()
-	while #workspace.Enemies:GetChildren() > 0 do
-		wait(1)
-	end
-end
-
--- main function to run waves
-local function runWaves()
-	for wave = 1, 30 do
-
-		local plr = game.Players:FindFirstChildOfClass("Player")
-		local levelBefore = plr:WaitForChild("Settings").Level.Value
-		workspace.Settings.Wave.Value = wave
-		workspace.Settings.Info.Value = "Wave "..wave.." starting!"
-		local zombieCount = wave * 2
-		local skeletonCount = math.floor(wave / 2)
-		local robotCount = math.floor(wave / 3)
-		local spawnDelay = 1 / wave
-
-		spawnEnemy("Robot", robotCount, spawnDelay)
-		spawnEnemy("Drooling Zombie", zombieCount, spawnDelay)
-		spawnEnemy("Skeleton", skeletonCount, spawnDelay + 0.5)
-
-		allEnemiesDefeated() -- wait for all enemies to be dead
-
-		local levelsGained = plr:WaitForChild("Settings").Level.Value - levelBefore
-
-		if levelsGained > 0 then -- if player gained levels start selecting upgrades
-			for i = 1, levelsGained, 1 do
-				selectUpgrades(plr)
-			end
-		end
-
-		workspace.Settings.Info.Value = "Wave "..wave.." completed!"
-		wait(5)
-	end
-	workspace.Settings.Info.Value = "All waves has been completed!"
-end
-
-runWaves() -- run the waves
 
 -- Function to find the closest enemy within range
 local function findClosestEnemy(player)
@@ -295,28 +131,23 @@ local function findClosestEnemy(player)
 
 
 	for _, enemy in pairs(enemiesFolder:GetChildren()) do -- goes through every enemy in the Enemies folder
-		if not enemy:FindFirstChild("HumanoidRootPart") then
-			return
-		end
+		if enemy:FindFirstChild("HumanoidRootPart") then
+			local humanoid = enemy:FindFirstChild("Humanoid")
 
-		local humanoid = enemy:FindFirstChild("Humanoid")
+			if humanoid and humanoid.Health > 0 then-- checks, if there's a humanoid and if its alive
+				local enemyPosition = enemy.HumanoidRootPart.Position
+				local distance = (enemyPosition - handle.Position).Magnitude
 
-		if not humanoid or humanoid.Health <= 0 then-- checks, if there's a humanoid and if its alive
-			return
-		end
-
-		local enemyPosition = enemy.HumanoidRootPart.Position
-		local distance = (enemyPosition - handle.Position).Magnitude
-
-		if distance < shortestDistance then -- checks, if the distance to the enemy is smaller than distance to the closest enemy yet
-			closestEnemy = enemy -- sets closest enemy to the (new) enemy with the shortest distance
-			shortestDistance = distance -- sets the shortest distance to the distance of the (new) closest enemy
+				if distance < shortestDistance then -- checks, if the distance to the enemy is smaller than distance to the closest enemy yet
+					closestEnemy = enemy -- sets closest enemy to the (new) enemy with the shortest distance
+					shortestDistance = distance -- sets the shortest distance to the distance of the (new) closest enemy
+				end
+			end
 		end
 	end
 
 	return closestEnemy -- returns back with the closest enemy found
 end
-
 
 
 -- Function to calculate the direction and distance to the target
@@ -355,77 +186,54 @@ local function handleCollision(arrow, targetEnemy, player, doNoclip)
 	local hittedHumans = {}
 	local traveledDistance = 0
 
-	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
-		return
+	if targetEnemy and targetEnemy:FindFirstChild("HumanoidRootPart") then
+		local connection
+		connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+			traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
+
+			if not targetEnemy:FindFirstChild("HumanoidRootPart") then else local raycastResult = workspace:Raycast(arrow.Position, (targetEnemy.HumanoidRootPart.Position - arrow.Position).Unit * 2)
+				if raycastResult then
+					local hitPart = raycastResult.Instance
+					local hitParent = hitPart.Parent
+					local humanoid = hitParent:FindFirstChild("Humanoid")
+
+					if hitParent == workspace.Map.Walls and not doNoclip then
+						arrow:Destroy()
+						connection:Disconnect()
+					end
+
+					if humanoid and humanoid.Health > 0 and hitParent ~= player.Character and not table.find(hittedHumans, humanoid) then
+						table.insert(hittedHumans, humanoid)
+
+						-- calculate the damage
+						local rageBonus = 1
+						if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
+							rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
+						end
+
+						local dmg = damage.Value * rageBonus
+						if math.random(1, 100) <= critChance.Value then
+							dmg = dmg * (critDmg.Value / 100)
+						end
+
+						if humanoid.Health - dmg <= 0 then
+							setupEnemy(hitParent)
+						end
+						-- finally, deal the boosted (or not) damage to humanoid
+						humanoid:TakeDamage(dmg)
+
+						if not doNoclip then
+							arrow:Destroy()
+							connection:Disconnect()
+						end
+					end
+				end
+			end
+		end)
 	end
-
-	local connection
-	connection = game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
-		traveledDistance = traveledDistance + (projectileSpeed.Value * deltaTime)
-
-		-- it has to be in the same line, since i couldn't denest this condition, since sometimes the script would break
-		if targetEnemy:FindFirstChild("HumanoidRootPart") then local raycastResult = workspace:Raycast(arrow.Position, (targetEnemy.HumanoidRootPart.Position - arrow.Position).Unit * 2)
-
-			if not raycastResult then
-				return
-			end
-
-			local hitPart = raycastResult.Instance
-			local hitParent = hitPart.Parent
-			local humanoid = hitParent:FindFirstChild("Humanoid")
-
-			if hitParent == workspace.Map.Walls and not doNoclip then
-				arrow:Destroy()
-				connection:Disconnect()
-			end
-
-			if not humanoid or humanoid.Health <= 0 or hitParent == player.Character or table.find(hittedHumans, humanoid) then
-				return
-			end
-
-			table.insert(hittedHumans, humanoid)
-
-			-- calculate the damage
-			local rageBonus = 1
-			if player.Character.Humanoid.Health / player.Character.Humanoid.MaxHealth <= 0.30 then
-				rageBonus = 1 + (upgrades[17].Increase * upgrades[17].PlayerHas) / 100
-			end
-
-			local dmg = damage.Value * rageBonus
-			if math.random(1, 100) <= critChance.Value then
-				dmg = dmg * (critDmg.Value / 100)
-			end
-
-			-- finally, deal the boosted (or not) damage to humanoid
-			humanoid:TakeDamage(dmg)
-
-			if not doNoclip then
-				arrow:Destroy()
-				connection:Disconnect()
-			end
-		end
-	end)
 end
 
--- Main function to fire one arrow
-local function fireArrow1(targetEnemy, player, doNoclip)
-	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
-		return
-	end
-
-	fire.PlaybackSpeed = math.random(80, 110) / 100
-	fire:Play()
-
-	local arrow = createArrow(doNoclip)
-	local direction, newTargetPosition = calculateTrajectory(arrow.Position, targetEnemy.HumanoidRootPart.Position)
-	arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-	moveArrow(arrow, newTargetPosition)
-	handleCollision(arrow, targetEnemy, player, doNoclip)
-end
-
--- Main function to fire two arrows
-local function fireArrow2(targetEnemy, player, doNoclip)
+local function fireArrows(targetEnemy, player, doNoclip, arrowCount)
 	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
 		return
 	end
@@ -435,13 +243,15 @@ local function fireArrow2(targetEnemy, player, doNoclip)
 
 	local targetPosition = targetEnemy.HumanoidRootPart.Position
 	local baseDirection = (targetPosition - handle.Position).Unit
-	local horizontalSpread = 0.03 -- arrow spread
+	local horizontalSpread = 0.08
 
-	-- For loop for 2 arrows
-	for i = -1, 1, 2 do
+	local startOffset = -(arrowCount - 1) / 2
+
+	for i = 0, arrowCount - 1 do
+		local offset = startOffset + i
+		local spreadDirection = (baseDirection + Vector3.new(offset * horizontalSpread, 0, 0)).Unit
+
 		local arrow = createArrow(doNoclip)
-
-		local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
 
 		local distance = (targetPosition - arrow.Position).Magnitude
 		local travelTime = distance / projectileSpeed.Value / 5
@@ -456,145 +266,34 @@ local function fireArrow2(targetEnemy, player, doNoclip)
 	end
 end
 
--- Main function to fire three arrows
-local function fireArrow3(targetEnemy, player, doNoclip)
-	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
-		return
-	end
-
-	fire.PlaybackSpeed = math.random(80, 110) / 100
-	fire:Play()
-
-	local targetPosition = targetEnemy.HumanoidRootPart.Position
-	local baseDirection = (targetPosition - handle.Position).Unit
-	local horizontalSpread = 0.08 -- arrow spread
-
-	-- For loop for 3 arrows
-	for i = -1, 1 do
-		local arrow = createArrow(doNoclip)
-		local spreadDirection
-
-		if i == 0 then
-			spreadDirection = baseDirection
-		else
-			spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
-		end
-
-		local distance = (targetPosition - arrow.Position).Magnitude
-		local travelTime = distance / projectileSpeed.Value / 5
-		local trueDistance = distance / travelTime * 5
-
-		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
-
-		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-		moveArrow(arrow, newTargetPosition)
-		handleCollision(arrow, targetEnemy, player, doNoclip)
-	end
-end
-
--- Main function to fire four arrows
-local function fireArrow4(targetEnemy, player, doNoclip)
-	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
-		return
-	end
-
-	fire.PlaybackSpeed = math.random(80, 110) / 100
-	fire:Play()
-
-	local targetPosition = targetEnemy.HumanoidRootPart.Position
-	local baseDirection = (targetPosition - handle.Position).Unit
-	local horizontalSpread = 0.08 -- arrow spread
-
-	-- For loop for 4 arrows
-	for i = -1.5, 1.5, 1 do
-		local arrow = createArrow(doNoclip)
-		local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
-
-		local distance = (targetPosition - arrow.Position).Magnitude
-		local travelTime = distance / projectileSpeed.Value / 5
-		local trueDistance = distance / travelTime * 5
-
-		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
-
-		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-		moveArrow(arrow, newTargetPosition)
-		handleCollision(arrow, targetEnemy, player, doNoclip)
-	end
-end
-
--- Main function to fire five arrows
-local function fireArrow5(targetEnemy, player, doNoclip)
-	if not targetEnemy or not targetEnemy:FindFirstChild("HumanoidRootPart") then
-		return
-	end
-
-	fire.PlaybackSpeed = math.random(80, 110) / 100
-	fire:Play()
-
-	local targetPosition = targetEnemy.HumanoidRootPart.Position
-	local baseDirection = (targetPosition - handle.Position).Unit
-	local horizontalSpread = 0.2
-
-	-- For loop for 5 arrows
-	for i = -2, 2 do
-		local arrow = createArrow(doNoclip)
-		local spreadDirection = (baseDirection + Vector3.new(i * horizontalSpread, 0, 0)).Unit
-
-		local distance = (targetPosition - arrow.Position).Magnitude
-		local travelTime = distance / projectileSpeed.Value / 5
-		local trueDistance = distance / travelTime * 5
-
-		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance)
-
-		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition)
-
-		moveArrow(arrow, newTargetPosition)
-		handleCollision(arrow, targetEnemy, player, doNoclip)
-	end
-end
 
 -- Main loop
 while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do
-	local player = game.Players:GetPlayerFromCharacter(weapon.Parent) -- get player
+	local player = game.Players:GetPlayerFromCharacter(tool.Parent) -- get player
+	if not originalPlayer then originalPlayer = player end
 
-	if not player then
-		return
-	end
+	if player then
+		local closestEnemy = findClosestEnemy(player) -- firing the function to find the closest enemy
+		if closestEnemy then
 
-	local closestEnemy = findClosestEnemy(player) -- firing the function to find the closest enemy
-	if not closestEnemy then
-		continue	
-	end
+			local doNoclip = false
 
-	local doNoclip = false
+			if upgrades[16].PlayerHas > 0 then
 
-	if upgrades[16].PlayerHas > 0 then
+				local randomNumb = math.random(1,100)
+				print(randomNumb, upgrades[16].PlayerHas * upgrades[16].Increase)
 
-		local randomNumb = math.random(1,100)
-		print(randomNumb, upgrades[16].PlayerHas * upgrades[16].Increase)
+				if randomNumb <= upgrades[16].PlayerHas * upgrades[16].Increase then 
 
-		if randomNumb <= upgrades[16].PlayerHas * upgrades[16].Increase then 
+					doNoclip = true -- if player has the projectile collision upgrade, there's a chance for the arrow to pass through things, and even hit multiple enemies at once!
+				end
 
-			doNoclip = true -- if player has the projectile collision upgrade, there's a chance for the arrow to pass through things, and even hit multiple enemies at once!
+			end
+
+			local projectileNumber = projectiles.Value + upgrades[7].PlayerHas -- get number of projectiles that will be launched
+			fireArrows(closestEnemy, player, doNoclip, projectileNumber)
+
 		end
-
 	end
 
-	local projectileNumber = projectiles.Value + upgrades[7].PlayerHas -- get number of projectiles that will be launched
-
-	if projectileNumber == 1 then
-		fireArrow1(closestEnemy, player, doNoclip)
-	elseif projectileNumber == 2 then
-		fireArrow2(closestEnemy, player, doNoclip)
-	elseif projectileNumber == 3 then
-		fireArrow3(closestEnemy, player, doNoclip)
-	elseif projectileNumber == 4 then
-		fireArrow4(closestEnemy, player, doNoclip)
-	elseif projectileNumber == 5 then
-		fireArrow5(closestEnemy, player, doNoclip)
-	else
-		warn("Invalid number of projectiles detected!") -- in case of some reason the number of projectiles is not valid (not between 1-5)
-	end
 end
