@@ -102,7 +102,7 @@ end)
 
 local function enemyDie(enemy)
 	workspace.Settings.Info.Value = "Enemy "..enemy.Name.." died!"
-	wait(1)
+	task.wait(1)
 	workspace.Settings.Info.Value = ""
 
 	local hmm = math.random(1,30)
@@ -115,7 +115,7 @@ local function enemyDie(enemy)
 	end
 
 	makeOrbs(enemy.XP.Value, enemy.HumanoidRootPart.Position)
-	wait(.5)
+	task.wait(.5)
 	enemy:Destroy()
 end
 
@@ -124,7 +124,7 @@ local function setupEnemy(enemy)
 	if not enemy:FindFirstChild("Humanoid") then
 		return
 	end
-	enemy.Humanoid.Died:Connect(function()
+	enemy.Humanoid.Died:Once(function()
 		enemyDie(enemy)
 	end)
 end
@@ -299,7 +299,7 @@ local function shoot(player)
 end
 
 -- Main loop
-while wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do
+while task.wait(fireRate.Value * (1 + (upgrades[2].Increase * upgrades[2].PlayerHas) / 100)) do
 	local player = game.Players:GetPlayerFromCharacter(tool.Parent) -- get player
 	if not originalPlayer then originalPlayer = player end
 
