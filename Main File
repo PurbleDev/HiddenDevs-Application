@@ -27,6 +27,7 @@ local playerState = tool:WaitForChild("PlayerState")
 local enemiesFolder = workspace:WaitForChild("Enemies")
 local serverStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 local arrowTemplate = serverStorage.Projectiles:WaitForChild("Arrow")
 
 local originalPlayer
@@ -34,101 +35,107 @@ local originalPlayer
 local lastShotTime = 0
 local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 
+-- Stats tracker (extra)
+local PlayerStats = setmetatable({}, {
+	__index = function(_, key)
+		return 0
+	end
+})
+
+-- function to create debug rays for visualization
+local function drawDebugRay(origin, direction)
+	local rayPart = Instance.new("Part")
+	rayPart.Anchored = true
+	rayPart.CanCollide = false
+	rayPart.Size = Vector3.new(0.1, 0.1, direction.Magnitude)
+	rayPart.CFrame = CFrame.new(origin, origin + direction) * CFrame.new(0, 0, -direction.Magnitude / 2)
+	rayPart.BrickColor = BrickColor.Red()
+	rayPart.Material = Enum.Material.Neon
+	rayPart.Transparency = 0.5
+	rayPart.Parent = workspace
+	Debris:AddItem(rayPart, 2)
+end
 
 -- function to create xp orbs
 function makeOrbs(number, pos)
 	for i = 1, number do
-		local clone = game.ServerStorage.Orb:Clone() -- clone the orb from the serverstorage
+		local clone = serverStorage.Orb:Clone()
 		clone.Parent = workspace.Orbs
 		clone.Position = pos
-		clone.Size *= (1 + upgrades[15].Increase * upgrades[15].PlayerHas/100) -- increase size based on the magnet upgrade (so player can get the orb from further away)
-
-
-		clone:ApplyImpulse(Vector3.new(math.random(100, 300), 200, math.random(100, 300))) -- random impulse to make orbs move around
+		clone.Size *= (1 + upgrades[15].Increase * upgrades[15].PlayerHas / 100)
+		clone:ApplyImpulse(Vector3.new(math.random(100, 300), 200, math.random(100, 300)))
 	end
 end
 
 local orbsTouched = {}
-
--- function to handle xp orbs collisions
 workspace.Orbs.ChildAdded:Connect(function(orb)
 	orb.Touched:Connect(function(hit)
-		if orbsTouched[orb] or not game.Players:GetPlayerFromCharacter(hit.Parent) then
-			return -- if the orb has been already touched, or the hit parent isnt player's character, then end the function
-		end
+		if orbsTouched[orb] or not game.Players:GetPlayerFromCharacter(hit.Parent) then return end
 		orbsTouched[orb] = true
 		orb.Collect.PlaybackSpeed = math.random(80, 120) / 100
-
-		local player = game.Players:GetPlayerFromCharacter(hit.Parent) -- get the player
+		local player = game.Players:GetPlayerFromCharacter(hit.Parent)
 		if player and player:FindFirstChild("Settings") and player.Settings:FindFirstChild("XP") then
-			player.Settings.XP.Value += orb.XP.Value + orb.XP.Value*upgrades[11].PlayerHas * upgrades[11].Increase/100 -- add the xp to the player's xp
+			player.Settings.XP.Value += orb.XP.Value + orb.XP.Value * upgrades[11].PlayerHas * upgrades[11].Increase / 100
 		end
-
-		orb:Destroy() -- destroy the orb
+		orb:Destroy()
 	end)
 end)
-
 
 -- function to create heal gems
 function makeHealGems(number, pos)
 	for i = 1, number do
-		local clone = game.ServerStorage.Health:Clone() -- clone the health gem from the serverstorage
+		local clone = serverStorage.Health:Clone()
 		clone.Parent = workspace.HealGems
 		clone.Position = pos
-
-		clone:ApplyImpulse(Vector3.new(math.random(100, 300), 200, math.random(100, 300))) -- random impulse to make orbs move around
+		clone:ApplyImpulse(Vector3.new(math.random(100, 300), 200, math.random(100, 300)))
 	end
 end
 
 local healGemsTouched = {}
-
--- function to handle heal gems collisions
 workspace.HealGems.ChildAdded:Connect(function(healGem)
 	healGem.Touched:Connect(function(hit)
-		if orbsTouched[healGem] or not game.Players:GetPlayerFromCharacter(hit.Parent) then
-			return -- if the health gem has been already touched, or the hit parent isnt player's character, then end the function
-		end
+		if orbsTouched[healGem] or not game.Players:GetPlayerFromCharacter(hit.Parent) then return end
 		orbsTouched[healGem] = true
 		healGem.Collect.PlaybackSpeed = math.random(80, 120) / 100
-
 		local player = game.Players:GetPlayerFromCharacter(hit.Parent)
 		if player and player.Character then
-			player.Character.Humanoid.Health += healGem.Health.Value + healGem.Health.Value*upgrades[13].PlayerHas * upgrades[13].Increase/100 -- add the health to the player's health
+			player.Character.Humanoid.Health += healGem.Health.Value + healGem.Health.Value * upgrades[13].PlayerHas * upgrades[13].Increase / 100
 		end
-
-		healGem:Destroy() -- destroy the health gem
+		healGem:Destroy()
 	end)
 end)
 
 local function enemyDie(enemy)
-	workspace.Settings.Info.Value = "Enemy "..enemy.Name.." died!"
-	task.wait(1)
-	workspace.Settings.Info.Value = ""
+	workspace.Settings.Info.Value = "Enemy " .. enemy.Name .. " died!"
+	task.delay(1, function()
+		workspace.Settings.Info.Value = ""
+	end)
 
-	local hmm = math.random(1,30)
-	if hmm <= (1 + upgrades[14].Increase * upgrades[14].PlayerHas) then
+	if math.random(1, 30) <= (1 + upgrades[14].Increase * upgrades[14].PlayerHas) then
 		makeHealGems(2, enemy.HumanoidRootPart.Position)
 	end
 
-	if originalPlayer.Character then
-		originalPlayer.Character.Humanoid.Health += (upgrades[12].Increase * upgrades[12].PlayerHas)/100 * originalPlayer.Character.Humanoid.MaxHealth
+	if originalPlayer and originalPlayer.Character then
+		originalPlayer.Character.Humanoid.Health += (upgrades[12].Increase * upgrades[12].PlayerHas) / 100 * originalPlayer.Character.Humanoid.MaxHealth
 	end
 
 	makeOrbs(enemy.XP.Value, enemy.HumanoidRootPart.Position)
-	task.wait(.5)
+	task.wait(0.5)
 	enemy:Destroy()
 end
 
--- Function to handle enemy death, so you can get XP orbs and optional HP gems
 local function setupEnemy(enemy)
-	if not enemy:FindFirstChild("Humanoid") then
-		return
-	end
+	if not enemy:FindFirstChild("Humanoid") then return end
 	enemy.Humanoid.Died:Once(function()
 		enemyDie(enemy)
 	end)
 end
 
+for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+	setupEnemy(enemy)
+end
+
+enemiesFolder.ChildAdded:Connect(setupEnemy)
 
 -- Function to find the closest enemy within range
 local function findClosestEnemy(player)
