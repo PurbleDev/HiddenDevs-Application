@@ -281,6 +281,8 @@ local function fireArrows(targetEnemy, player, doNoclip, arrowCount)
 
 		local newTargetPosition = arrow.Position + (spreadDirection * trueDistance) -- calculate the new target position based on the spread direction and distance
 
+		drawDebugRay(arrow.Position, newTargetPosition - arrow.Position)
+
 		arrow.CFrame = CFrame.new(arrow.Position, newTargetPosition) -- set the arrow's position and orientation to the new target
 
 		moveArrow(arrow, newTargetPosition) -- fire the arrow to the new target
