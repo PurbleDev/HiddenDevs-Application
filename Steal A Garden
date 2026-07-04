@@ -1,0 +1,1497 @@
+--[[
+Connected Discord-GitHub
+
+Hallo everynyan!
+
+This is the main script for 'Steal a Garden' game on Roblox!
+
+This script was written by Purble_Dev 
+
+DISCORD: @purbledev
+ROBLOX: @maselko7 (Purble_Dev)
+]]
+
+local tS = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local PhysicsService = game:GetService("PhysicsService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Players = game:GetService("Players")
+local plotsFolder = game.Workspace.Map.Plots
+local folder = workspace:WaitForChild("ToolInstances")
+
+local scriptStages = {"StageI", "StageII", "StageIII", "StateIV", "StageV", "StageMax"}
+local deliveredPots = {}
+
+
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local modules = ReplicatedStorage:WaitForChild("Modules")
+
+local requestEvent = remotes:WaitForChild("RequestClone")
+local gradients = ReplicatedStorage:WaitForChild("RarityGradients")
+local rarities = require(modules:WaitForChild("Rarities"))
+local plants = require(modules:WaitForChild("Plants"))
+local CropReplacer = require(modules:WaitForChild("CropHandler"))
+local mutations = require(modules:WaitForChild("Mutations"))
+local stageFormatter = require(modules:WaitForChild("Stages"))
+local playtimeRewards = require(modules:WaitForChild("PlaytimeRewards"))
+
+local Shared = require(script:WaitForChild("Shared"))
+local SharedInfo = require(modules:WaitForChild("SharedSetup"))
+local SharedSetup = SharedInfo.SharedSetup
+local PlayerData = SharedInfo.PlayerData
+
+local FreeSpinData = remotes:WaitForChild("FreeSpinData")
+local FREE_SPIN_COOLDOWN = SharedSetup.Time_For_Free_Spin
+
+-- Function to get a random rarity based on weighted chance
+local function getRandomRarity()
+	local totalChance = 0
+	for name, rarity in pairs(rarities) do
+		totalChance += rarity.Chance
+	end
+
+	local randomChance = math.random() * totalChance
+	local currentSum = 0
+
+	for name, rarity in pairs(rarities) do
+		currentSum += rarity.Chance
+		if randomChance <= currentSum then
+			return name
+		end
+	end
+end
+
+-- Function to get a random plant mutation based on weighted chance
+local function getRandomMutation()
+	local totalChance = 0
+	for name, rarity in pairs(mutations) do
+		totalChance += rarity.Chance
+	end
+
+	local randomChance = math.random() * totalChance
+	local currentSum = 0
+
+	for name, rarity in pairs(mutations) do
+		currentSum += rarity.Chance
+		if randomChance <= currentSum then
+			return name
+		end
+	end
+end
+
+local function calculateTheTime(object, endObject)
+	local difference = (object.Position - endObject.Position).magnitude
+	return (difference/SharedSetup.Drone_Speed)
+end
+
+-- basic function for formatting number values (mostly currencies)
+local function formatNumber(n)
+	local suffixes = { "", "k", "M", "B", "T", "Qa", "Qi" }
+	local i = 1
+	while n >= 1000 and i < #suffixes do
+		n = n / 1000
+		i = i + 1
+	end
+	return string.format("%.2f%s", n, suffixes[i])
+end
+
+
+-- Ensure collision group exists
+local function ensureCollisionGroup(name)
+	local exists = false
+	for _, group in ipairs(PhysicsService:GetRegisteredCollisionGroups()) do
+		if group.name == name then
+			exists = true
+			break
+		end
+	end
+	if not exists then
+		PhysicsService:RegisterCollisionGroup(name)
+	end
+end
+
+ensureCollisionGroup("Camera")
+
+local function setCollisionRules(ownerGroup, wallGroup)
+	PhysicsService:CollisionGroupSetCollidable(ownerGroup, wallGroup, false)
+	PhysicsService:CollisionGroupSetCollidable("Default", wallGroup, true)
+	PhysicsService:CollisionGroupSetCollidable("Camera", wallGroup, false)
+end
+
+local function init()
+	for _, plot in pairs(plotsFolder:GetChildren()) do
+		plot:SetAttribute("Owner", nil)
+	end
+end
+
+local function findUnownedPlot()
+	for _, plot in pairs(plotsFolder:GetChildren()) do
+		if not plot:GetAttribute("Owner") then
+			return plot
+		end
+	end
+	return nil
+end
+
+local function getPlayerOwnerGroup(plr)
+	return "Owner_" .. plr.UserId
+end
+
+local function playerOwnsPlot(plr)
+	for _, plot in ipairs(plotsFolder:GetChildren()) do
+		if plot:GetAttribute("Owner") == plr.UserId then
+			return true
+		end
+	end
+	return false
+end
+
+local function toggleLasers(plot, value)
+	local laserHitbox = plot:FindFirstChild("LaserHitbox")
+	if laserHitbox and laserHitbox:FindFirstChild("Main") then
+		laserHitbox.Main.CanCollide = value
+	end
+
+	local lasers = plot:FindFirstChild("Laser")
+	if lasers then
+		for _, model in ipairs(lasers:GetChildren()) do
+			for _, part in ipairs(model:GetChildren()) do
+				if part.Name == "laserBase" then
+					part.Transparency = value and 0 or 1
+				elseif part.Name == "laserPart" then
+					part.Transparency = value and 0.6 or 1
+				end
+			end
+		end
+	end
+end
+
+init()
+
+function locateEmptySlot(base)
+	local emptySlot = nil
+
+	for _, slot in pairs(base.PlantSlots:GetChildren()) do
+		if slot:GetAttribute("Occupied") == false then
+			emptySlot = slot
+			break
+		end
+	end
+
+	return emptySlot
+end
+
+function TimeForSpin(player)
+	if not player then return end
+	if not player:FindFirstChild("PlayerData") then return end
+	local prizeWheel = player.PlayerData:FindFirstChild("PrizeWheel")
+	if not prizeWheel then return end
+
+	local lastSpin = prizeWheel:FindFirstChild("LastFreeSpin")
+	local spins = prizeWheel:FindFirstChild("Spins")
+	if not lastSpin or not spins then return end
+
+	if not player.PlayerData:FindFirstChild("Upgrades") or not player.PlayerData.Upgrades:FindFirstChild("Quicker Spins") then
+		return
+	end
+
+	local now = os.time()
+	local hasTo = FREE_SPIN_COOLDOWN
+
+	if player.PlayerData.Upgrades["Quicker Spins"].Value == true then
+		hasTo = hasTo * (1 - SharedSetup.Upgrades["Quicker Spins"].Effect)
+	end
+
+	if now - lastSpin.Value >= hasTo then
+		spins.Value += 1
+		lastSpin.Value = now
+
+	end
+	
+	FreeSpinData:FireClient(player, lastSpin.Value, hasTo)
+end
+
+--[[
+  ____        _          ____  _                 
+ |  _ \  __ _| |_ __ _  / ___|| |_ ___  _ __ ___ 
+ | | | |/ _` | __/ _` | \___ \| __/ _ \| '__/ _ \
+ | |_| | (_| | || (_| |  ___) | || (_) | | |  __/
+ |____/ \__,_|\__\__,_| |____/ \__\___/|_|  \___|
+                                                 
+]]--
+local DataStoreService = game:GetService("DataStoreService")
+local RunService = game:GetService("RunService")
+
+local dS = Shared.DataStoreVersion -- Check this module for datastore stuff
+local dataStore = DataStoreService:GetDataStore(dS)
+
+
+-- create the player data structure using folders and values inside the player
+local function createDataStructure(player, data, parent)
+	for name, value in pairs(data) do
+		if typeof(value) == "table" and value.Type and value.Value ~= nil and name ~= "Local Data" then -- value
+			local val = Instance.new(value.Type)
+			val.Name = name
+			val.Value = value.Value
+			val.Parent = parent
+		elseif typeof(value) == "table" and name ~= "Local Data" then -- that's the folder
+			local folder = Instance.new("Folder")
+			folder.Name = name
+			folder.Parent = parent
+			createDataStructure(player, value, folder) -- recurrency
+		end
+	end
+end
+
+-- Load player data
+function loadData(player, base)
+	local success, data = pcall(function()
+		return dataStore:GetAsync(player.UserId)
+	end)
+
+	createDataStructure(player, PlayerData, player)
+
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		leaderstats.Parent = player
+	end
+
+	if not (success and data) then
+		warn("⚠️ No data found or failed to load for", player.Name)
+
+		-- Create default structure manually if needed
+		createDataStructure(player, PlayerData, player)
+
+		-- Make sure leaderstats and PlayerData exist
+		local leaderstats = player:FindFirstChild("leaderstats")
+		if leaderstats then
+			leaderstats.Parent = player
+		end
+
+		-- Optionally save default data immediately to DataStore
+		local defaultSave = {
+			PlayerData = { PlayerData = PlayerData },
+			Plants = {},
+			QuitTime = os.time(),
+		}
+		local ok, err = pcall(function()
+			dataStore:SetAsync(player.UserId, defaultSave)
+		end)
+		if not ok then
+			warn("❌ Failed to save initial data for new player:", player.Name, err)
+		end
+
+		-- Continue setup (don’t return!)
+		data = defaultSave
+	end
+
+
+	-- now load the data and put it inside the previously created structure
+	local function applyDataStructure(folder, savedData)
+		for name, valueData in pairs(savedData) do
+			local obj = folder:FindFirstChild(name)
+			if obj then
+				if obj:IsA("Folder") and typeof(valueData) == "table" then
+					applyDataStructure(obj, valueData) -- reccurency
+				elseif obj:IsA("ValueBase") then
+					if typeof(valueData) == "table" and valueData.Value ~= nil then
+						obj.Value = valueData.Value
+					elseif typeof(valueData) == typeof(obj.Value) then
+						obj.Value = valueData
+					end
+				end
+
+			end
+		end
+	end
+	
+	-- dynamic data structures
+	local function applyDynamicDataStructure(folder, savedData)
+		for name, valueData in pairs(savedData) do
+			local obj = folder:FindFirstChild(name)
+
+			if not obj then
+				if typeof(valueData) == "table" and valueData.Type and valueData.Value ~= nil then
+					local newVal = Instance.new(valueData.Type, folder)
+					newVal.Name = name
+					newVal.Value = valueData.Value
+					obj = newVal
+				elseif typeof(valueData) == "number" then
+					local intVal = Instance.new("IntValue", folder)
+					intVal.Name = name
+					intVal.Value = valueData
+					obj = intVal
+				end
+			end
+
+			if obj then
+				if obj:IsA("Folder") and typeof(valueData) == "table" then
+					applyDynamicDataStructure(obj, valueData)
+				elseif obj:IsA("ValueBase") then
+					if typeof(valueData) == "table" and valueData.Value ~= nil then
+						obj.Value = valueData.Value
+					elseif typeof(valueData) == typeof(obj.Value) then
+						obj.Value = valueData
+					end
+				end
+			end
+		end
+	end
+
+	if data.PlayerData then
+		local playerData = player:FindFirstChild("PlayerData")
+		local leaderstats = player:FindFirstChild("leaderstats")
+		local spinThingy = player:FindFirstChild("PrizeWheel")
+
+		if playerData and data.PlayerData.PlayerData then
+			applyDataStructure(playerData, data.PlayerData.PlayerData)
+
+			local dynamicFolders = {"Inventory", "PrizeWheel", "Upgrades"}
+			for _, folderName in ipairs(dynamicFolders) do
+				local folder = playerData:FindFirstChild(folderName)
+				if folder and data.PlayerData.PlayerData[folderName] then
+					applyDynamicDataStructure(folder, data.PlayerData.PlayerData[folderName])
+				end
+			end
+		end
+
+		if leaderstats and data.PlayerData.leaderstats then
+			applyDataStructure(leaderstats, data.PlayerData.leaderstats)
+		end
+	end
+	
+	print(data) -- debug print
+
+	-- handle plants loading and offline income
+	if data.Plants and base then
+		local timeDifference = os.time() - (data.QuitTime or os.time())
+		if timeDifference > SharedSetup.Offline_Income_Max_Time then
+			timeDifference = SharedSetup.Offline_Income_Max_Time
+		end
+
+		for pot, info in pairs(data.Plants) do
+			local currentPot = base.PlantSlots:FindFirstChild(pot)
+			if currentPot then
+				if info.Plant then
+					local setUp = info.Plant
+					local stage = setUp.Stage
+
+					local matchingPlant = nil
+					for _, plant in ipairs(plants) do
+						if plant.Name == setUp.Name then
+							matchingPlant = plant
+							break
+						end
+					end
+
+					CropReplacer.CreateNewPot(player, base, setUp, currentPot)
+
+					if matchingPlant then
+						local nextStage = scriptStages[stage + 1]
+						if nextStage and matchingPlant.Stages[nextStage] then
+							local income = matchingPlant.Stages[nextStage].Income
+							local multiplier = mutations[info.Plant.Mutation].Multiplier or 1
+							
+							
+
+							if matchingPlant.Rarity == "Rebirth" then
+								local offlineTokens = income * timeDifference * SharedSetup.Offline_Income_Multiplier * multiplier * SharedSetup.Tokens_Boost
+								currentPot.OfflineTokens.Value = math.round(offlineTokens * 100) / 100
+							else
+								multiplier *= 1 + player.leaderstats.Rebirths.Value * SharedSetup.Rebirth_Multiplier
+								local offlineMoney = income * timeDifference * SharedSetup.Offline_Income_Multiplier * multiplier * SharedSetup.Money_Boost
+								currentPot.OfflineIncome.Value = math.floor(offlineMoney)
+							end
+						end
+					end
+				end
+
+				currentPot.MoneyToClaim.Value = info.MoneyToClaim
+				currentPot.OfflineIncome.Value += info.OfflineIncome
+				currentPot.TokensToClaim.Value = info.TokensToClaim
+				currentPot.OfflineTokens.Value += info.OfflineTokens
+			end
+		end
+	end
+	
+	-- safe inventory setup
+	if player:WaitForChild("PlayerData", 5) then
+		local pd = player:FindFirstChild("PlayerData")
+		local inventory = pd and pd:FindFirstChild("Inventory")
+		if inventory then
+			if data.PlayerData and data.PlayerData.PlayerData and data.PlayerData.PlayerData.Inventory then
+				applyDynamicDataStructure(inventory, data.PlayerData.PlayerData.Inventory)
+			end
+			print("✅ Firing PlayerLoaded for", player.Name)
+			ReplicatedStorage.Remotes.PlayerLoaded:FireClient(player, inventory)
+		else
+			warn("⚠️ Inventory not found for", player.Name)
+		end
+
+	end
+
+	-- free spin handler
+	local pd = player:FindFirstChild("PlayerData")
+	local prizeWheel = pd and pd:FindFirstChild("PrizeWheel")
+	if prizeWheel then
+		if prizeWheel:FindFirstChild("LastFreeSpin") and prizeWheel.LastFreeSpin.Value == 0 then
+			prizeWheel.LastFreeSpin.Value = os.time()
+		end
+
+		local joined = prizeWheel:FindFirstChild("Joined")
+		if joined and joined.Value == 0 then
+			joined.Value = os.time()
+		end
+	end
+
+	local loadConn
+	loadConn = ReplicatedStorage.Remotes.Load.OnServerEvent:Connect(function(plr)
+		if plr == player then
+			local localData = player:FindFirstChild("Local Data")
+			if localData and localData:FindFirstChild("Loaded") then
+				localData.Loaded.Value = true
+			end
+			if loadConn then
+				loadConn:Disconnect()
+				loadConn = nil
+			end
+		end
+	end)
+
+	print("✅ About to fire Load for:", player.Name)
+	ReplicatedStorage.Remotes.Load:FireClient(player)
+
+	-- manually check for Loaded flag
+	local startTime = os.clock()
+	local timeout = 10
+	repeat
+		wait()
+	until (player:FindFirstChild("Local Data") and player["Local Data"]:FindFirstChild("Loaded") and player["Local Data"].Loaded.Value == true) or (os.clock() - startTime > timeout)
+
+
+	print("loaded")
+	if not (player:FindFirstChild("Local Data") and player["Local Data"]:FindFirstChild("Loaded") and player["Local Data"].Loaded.Value == true) then
+		warn("Player did not confirm client load in time: "..(player.Name or "unknown"))
+	end
+
+	-- disconnect load event once confirmed
+	if loadConn then
+		loadConn:Disconnect()
+		loadConn = nil
+	end
+end
+
+
+-- Save player data
+local function saveData(player)
+	if not player then return end
+
+	local data = {
+		PlayerData = {},
+		Plants = nil,
+		QuitTime = os.time(),
+		
+	}
+
+	local function serializeValues(folder)
+		local result = {}
+
+		for _, child in ipairs(folder:GetChildren()) do
+			if child:IsA("Folder") then
+				result[child.Name] = serializeValues(child)
+			elseif child:IsA("ValueBase") then
+				result[child.Name] = {
+					Value = child.Value,
+					Type = child.ClassName
+				}
+			end
+		end
+
+		return result
+	end
+
+	local playerDataFolder = player:FindFirstChild("PlayerData")
+	local leaderstatsFolder = player:FindFirstChild("leaderstats")
+
+	if playerDataFolder or leaderstatsFolder then
+		data.PlayerData = {
+			PlayerData = playerDataFolder and serializeValues(playerDataFolder) or {},
+			leaderstats = leaderstatsFolder and serializeValues(leaderstatsFolder) or {}
+		}
+	end
+
+	-- Plants data
+	local playersBase
+	local plants = {}
+
+	for _, base in pairs(workspace.Map.Plots:GetChildren()) do
+		if base:GetAttribute("Owner") == player.UserId then
+			playersBase = base
+			break
+		end
+	end
+
+	-- save every info about the plants in the plot
+	if playersBase then
+		for _, plot in pairs(playersBase.PlantSlots:GetChildren()) do
+			local plotInfo = {
+				MoneyToClaim = plot.MoneyToClaim.Value, 
+				TokensToClaim = plot.TokensToClaim.Value, 
+				OfflineIncome = plot.OfflineIncome.Value, 
+				OfflineTokens = plot.OfflineTokens.Value, 
+				Plant = nil
+			}
+
+			if plot:FindFirstChild("Pot") then
+				local plant = plot:FindFirstChild("Pot")
+				local settings = plant:FindFirstChild("Settings")			
+
+				if settings.Thief.Value == nil then
+					plotInfo.Plant = {
+						Name = settings.DisplayName.Value, 
+						Stage = settings.Stage.Value, 
+						StagePercent = settings.StagePercentage.Value, 
+						Mutation = settings.Mutation.Value
+					}
+					plant:Destroy()
+				else
+					local thief = settings.Thief.Value
+					local playersPlot = nil
+					local freeSpot
+
+					for _, p in pairs(workspace.Map.Plots:GetChildren()) do
+						if p:GetAttribute("Owner") == thief.UserId then
+							playersPlot = p
+							for _, spot in pairs(p.PlantSlots:GetChildren()) do
+								if not spot:FindFirstChild("Pot") and spot:GetAttribute("Occupied") == false then
+									freeSpot = spot
+									break
+								end
+							end
+							break
+						end
+					end
+
+					if playersPlot and freeSpot then 
+						CropReplacer.CreateNewPot(thief, playersPlot, plant)
+					end
+				end
+
+				plot.MoneyToClaim.Value = 0
+				plot.TokensToClaim.Value = 0
+				plot.OfflineIncome.Value = 0
+				plot.OfflineTokens.Value = 0
+				plot:SetAttribute("Occupied", false)
+			end
+
+			plants[plot.Name] = plotInfo
+		end
+
+		data.Plants = plants
+	end
+
+	local success, err = pcall(function()
+		dataStore:SetAsync(player.UserId, data)
+	end)
+	print(data)
+
+	if not success then
+		warn("❌ Failed to save data for", player.Name, ":", err)
+	end
+end
+
+--[[
+  ____  _                       
+ |  _ \| | __ _ _   _  ___ _ __ 
+ | |_) | |/ _` | | | |/ _ \ '__|
+ |  __/| | (_| | |_| |  __/ |   
+ |_|   |_|\__,_|\__, |\___|_|   
+                |___/           
+                
+]]
+
+-- player setup
+Players.PlayerAdded:Connect(function(player)
+	local plot = findUnownedPlot()
+	if plot then
+		plot:SetAttribute("Owner", player.UserId)
+		local plotSign = plot:FindFirstChild("PlotSign")
+		if plotSign and plotSign:FindFirstChild("SurfaceGui") and plotSign.SurfaceGui:FindFirstChild("Frame") and plotSign.SurfaceGui.Frame:FindFirstChild("TextLabel") then
+			plotSign.SurfaceGui.Frame.TextLabel.Text = player.Name
+		end
+
+		local LocalDisplayRemote = ReplicatedStorage:FindFirstChild("Remotes").LocalDisplay
+		LocalDisplayRemote:FireClient(player, plot)
+
+		local ownerGroup = getPlayerOwnerGroup(player)
+		local wallGroup = "Wall_" .. player.UserId
+		ensureCollisionGroup(ownerGroup)
+		ensureCollisionGroup(wallGroup)
+		setCollisionRules(ownerGroup, wallGroup)
+
+
+		local tempData = Instance.new("Folder", player)
+		tempData.Name = "Local Data"
+
+		for name, stat in pairs(PlayerData["Local Data"]) do
+			local statVal = Instance.new(stat.Type, tempData)
+
+			statVal.Name = name
+			statVal.Value = stat.Value
+		end
+
+		-- give the player friend boost for each friend on the server
+		for _, plr in game:GetService("Players"):GetChildren() do
+
+			local friendsBoost = player:FindFirstChild("Local Data"):FindFirstChild("Friend Boost")
+			friendsBoost.Value = 1
+			for _, otherPlayer in game:GetService("Players"):GetChildren() do
+				if plr:IsFriendsWith(otherPlayer.UserId) then
+					friendsBoost.Value += SharedSetup.Friend_Boost_Multiplier
+				end
+			end
+		end
+		
+		loadData(player, plot)
+
+		-- start the reward cycle
+		playtimeRewards.Functions.StartRewardCycle(player)
+
+		local laserHitboxObj = plot:FindFirstChild("LaserHitbox")
+		if laserHitboxObj and laserHitboxObj:FindFirstChild("Main") then
+			laserHitboxObj.Main.CollisionGroup = wallGroup
+			toggleLasers(plot, true)
+
+			local LockTimers = plot:FindFirstChild("Purchases")
+			if LockTimers then
+				for _, model in ipairs(LockTimers:GetChildren()) do
+					if model:FindFirstChild("Main") then
+						local timerGui = model.Main:FindFirstChild("BillboardGui")
+						if timerGui and timerGui:FindFirstChild("RemainingTime") then
+							local timerLabel = timerGui.RemainingTime
+							local locked = timerGui:FindFirstChild("Locked")
+							local lockStudio = timerGui:FindFirstChild("LockStudio")
+							local button = model:FindFirstChild("Main")
+							timerLabel.Visible = true
+							if locked then locked.Visible = true end
+							if lockStudio then lockStudio.Visible = false end
+							if button then
+								button.Color = Color3.fromRGB(255, 0, 0)
+							end
+							local tiem = SharedSetup.Shield_Lasting_Time
+
+
+							if player.PlayerData.Upgrades["Longer Shield"].Value == true then
+								tiem = SharedSetup.Upgrades["Longer Shield"].Effect
+							end
+
+							timerLabel.Text = tiem
+							model:SetAttribute("IsLocked", true)
+							toggleLasers(plot, true)
+
+							task.spawn(function()
+								for t = tiem, 1, -1 do
+									timerLabel.Text = tostring(t)
+									task.wait(1)
+								end
+								timerLabel.Text = ""
+								timerLabel.Visible = false
+								if locked then locked.Visible = false end
+								if lockStudio then lockStudio.Visible = true end
+								if button then
+									button.Color = Color3.fromRGB(255, 255, 0)
+								end
+								model:SetAttribute("IsLocked", false)
+								toggleLasers(plot, false)
+							end)
+
+							if button and button.Parent:FindFirstChild("Hitbox") then
+								button.Parent.Hitbox.Touched:Connect(function(hit)
+									local character = hit.Parent
+									local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+									if humanoid and game.Players:GetPlayerFromCharacter(character) == player then
+										if not model:GetAttribute("IsLocked") then
+											model:SetAttribute("IsLocked", true)
+											toggleLasers(plot, true)
+											timerLabel.Visible = true
+											if locked then locked.Visible = true end
+											if lockStudio then lockStudio.Visible = false end
+											button.Color = Color3.fromRGB(255, 0, 0)
+											local tiem = SharedSetup.Shield_Lasting_Time
+
+											if player.PlayerData.Upgrades["Longer Shield"].Value == true then
+												tiem = SharedSetup.Upgrades["Longer Shield"].Effect
+											end
+
+											timerLabel.Text = tiem
+											task.spawn(function()
+												for t = tiem, 1, -1 do
+													timerLabel.Text = tostring(t)
+													task.wait(1)
+												end
+												timerLabel.Text = ""
+												timerLabel.Visible = false
+												if locked then locked.Visible = false end
+												if lockStudio then lockStudio.Visible = true end
+												button.Color = Color3.fromRGB(255, 255, 0)
+												model:SetAttribute("IsLocked", false)
+												toggleLasers(plot, false)
+											end)
+										end
+									end
+								end)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		local lasers = plot:FindFirstChild("Laser")
+		if lasers then
+			for _, model in ipairs(lasers:GetChildren()) do
+				for _, part in ipairs(model:GetChildren()) do
+					if part:IsA("BasePart") then
+						part.CollisionGroup = wallGroup
+					end
+				end
+			end
+		end
+
+		-- income multiplier stuff ig
+		local multiplier = 1
+		local rebirths = player:FindFirstChild("leaderstats") and player.leaderstats:FindFirstChild("Rebirths")
+		local multiplierObj = plot:FindFirstChild("Multiplier")
+		if multiplierObj and multiplierObj:FindFirstChild("Main") and multiplierObj.Main:FindFirstChild("Amount") then
+			multiplierObj.Main.Amount.Text = tostring(tonumber(multiplier) or (rebirths and tonumber(rebirths.Value) + 1) or 1) .. "x"
+		end
+
+		-- FRIEND PANEL LOGIC: Toggle access for friends IN THE SERVER at trigger time,
+		-- but never override a player's own base collision group!
+		local friendPanel = plot:FindFirstChild("FriendPanel")
+		if friendPanel and friendPanel:FindFirstChild("Main") and friendPanel.Main:FindFirstChild("ProximityPrompt") then
+			local prompt = friendPanel.Main.ProximityPrompt
+			local friendsAllowed = false -- toggle state for this plot
+
+			local function setFriendsAccess(enable)
+				for _, otherPlayer in ipairs(game.Players:GetPlayers()) do
+					if otherPlayer ~= player and player:IsFriendsWithAsync(otherPlayer.UserId) then
+						-- only set collision group if the friend does NOT own a plot
+						local isFriendOwner = false
+						for _, checkPlot in ipairs(plotsFolder:GetChildren()) do
+							if checkPlot:GetAttribute("Owner") == otherPlayer.UserId then
+								isFriendOwner = true
+								break
+							end
+						end
+						if not isFriendOwner then
+							if otherPlayer.Character then
+								for _, part in ipairs(otherPlayer.Character:GetDescendants()) do
+									if part:IsA("BasePart") then
+										part.CollisionGroup = enable and ownerGroup or "Default"
+									end
+								end
+							end
+							-- only assign CharacterAdded connection if enabling
+							if enable then
+								otherPlayer.CharacterAdded:Connect(function(char)
+									for _, part in ipairs(char:GetDescendants()) do
+										if part:IsA("BasePart") then
+											part.CollisionGroup = ownerGroup
+										end
+									end
+								end)
+							end
+						end
+					end
+				end
+			end
+
+			prompt.Triggered:Connect(function(triggeringPlayer)
+				if triggeringPlayer ~= player then return end -- only the owner can use
+				friendsAllowed = not friendsAllowed
+
+				for _, otherPlayer in ipairs(game.Players:GetPlayers()) do
+					if otherPlayer ~= player and player:IsFriendsWithAsync(otherPlayer.UserId) then
+						local friendGroup = "Owner_" .. otherPlayer.UserId
+						-- set collision so your walls let their group through if enabled, or block if disabled
+						PhysicsService:CollisionGroupSetCollidable(friendGroup, wallGroup, not friendsAllowed)
+					end
+				end
+				if friendsAllowed then
+					prompt.ActionText = "Disable Friend Access"
+					local imgLabel = friendPanel.Main:FindFirstChild("SurfaceGui") and friendPanel.Main.SurfaceGui:FindFirstChild("ImageLabel")
+					if imgLabel then
+						imgLabel.Image = "rbxassetid://126413229640303"
+					end
+				else
+					prompt.ActionText = "Enable Friend Access"
+					local imgLabel = friendPanel.Main:FindFirstChild("SurfaceGui") and friendPanel.Main.SurfaceGui:FindFirstChild("ImageLabel")
+					if imgLabel then
+						imgLabel.Image = "rbxassetid://110783679426495"
+					end
+				end
+			end)
+		end
+
+		player.CharacterAdded:Connect(function(char)
+			for _, part in ipairs(char:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.CollisionGroup = ownerGroup
+				end
+			end
+			local spawnObj = plot:FindFirstChild("Spawn")
+			if spawnObj and spawnObj:IsA("BasePart") then
+				char:MoveTo(spawnObj.Position)
+			end
+			
+			local mult = 1
+
+			if player.PlayerData.Upgrades["Faster Movement"].Value == true then
+				mult += SharedSetup.Upgrades["Faster Movement"].Effect
+			end
+
+			char.Humanoid.WalkSpeed = SharedSetup.Walk_Speed * mult
+			char.Humanoid.JumpHeight = SharedSetup.Jump_Height
+			
+			player.PlayerData.Upgrades["Faster Movement"].Changed:Connect(function()
+				local mult2 = 1
+
+				if player.PlayerData.Upgrades["Faster Movement"].Value == true then
+					mult2 += SharedSetup.Upgrades["Faster Movement"].Effect
+				end
+
+				char.Humanoid.WalkSpeed = SharedSetup.Walk_Speed * mult2
+				char.Humanoid.JumpHeight = SharedSetup.Jump_Height
+			end)
+		end)
+
+		task.defer(function()
+			TimeForSpin(player)
+			print("executed")
+		end)
+
+
+		player.PlayerData.Upgrades["Quicker Spins"].Changed:Connect(function()
+			print("changed, fired")
+			TimeForSpin(player)
+		end)
+
+		player:LoadCharacterAsync()
+	else
+		warn("No unowned plots available for " .. player.Name)
+		player:Kick("Error: No unowned plots available for you. Please try again!")
+	end
+end)
+
+local savedPlayers = {}
+
+Players.PlayerRemoving:Connect(function(player)
+	saveData(player)
+end)
+
+--game:BindToClose(function()
+--	for _, player in ipairs(Players:GetPlayers()) do
+--		saveData(player)
+--	end
+--end)
+
+
+--[[
+ __        ___     _ _        _                      
+ \ \      / / |__ (_) | ___  | |    ___   ___  _ __  
+  \ \ /\ / /| '_ \| | |/ _ \ | |   / _ \ / _ \| '_ \ 
+   \ V  V / | | | | | |  __/ | |__| (_) | (_) | |_) |
+    \_/\_/  |_| |_|_|_|\___| |_____\___/ \___/| .__/ 
+                                              |_|    
+                                              
+]]
+
+local SpawnQueue = require(script:WaitForChild("SpawnQueue"))
+local stagesModule = require(modules.Stages)
+
+
+
+local spawnQueue = {}
+
+local reservedSpots = {} -- [drone] = {player = player, slot = slot}
+
+
+-- Function to select a valid plant
+
+-- Initial Plant
+local chosen = CropReplacer.getRandomRarity()
+local selectedPlant = CropReplacer.selectPlantByRarity(chosen)
+local mutation = CropReplacer.getRandomMutation()
+
+SpawnQueue.Add({
+	plant = selectedPlant,
+	rarity = chosen,
+	mutation = mutation,
+	stage = 1
+})
+
+local function numberToTime(n)
+	local hours = math.floor(n / 3600)
+	local minutes = math.floor((n % 3600) / 60)
+	local seconds = n % 60
+	return string.format("%02d:%02d:%02d", hours, minutes, seconds)
+end
+
+-- Processes one spawn from the queue every 2 seconds
+task.spawn(function()
+	while true do
+		wait(SharedSetup.Drone_Spawn_Time)
+
+		local chosen = getRandomRarity()
+		local selectedPlant = CropReplacer.selectPlantByRarity(chosen)
+		local mutation = getRandomMutation()
+
+		SpawnQueue.Add({
+			plant = selectedPlant,
+			rarity = chosen,
+			mutation = mutation,
+			stage = 0
+		})
+
+		if SpawnQueue.Size() > 0 then
+			local cropData = SpawnQueue.Pop()
+
+			local selectedPlant = cropData.plant
+			local stage = cropData.stage
+			local mutation = cropData.mutation
+			local chosen = cropData.rarity
+
+			local cropModel = ReplicatedStorage.Crops:FindFirstChild(selectedPlant.Name)
+			if not cropModel then
+				warn("Cannot find model for:", selectedPlant.Name, "- falling back to PlaceholderCrop.")
+				cropModel = ReplicatedStorage.Crops:FindFirstChild("PlaceholderCrop")
+			end
+
+			if cropModel then
+				local clone = game.ReplicatedStorage.Instances.Drone:Clone()
+				local primary = clone.PrimaryPart
+				clone.Parent = workspace
+				clone:MoveTo(workspace.Map.Road.Start.Position)
+
+				CropReplacer.SpawnCropNew(clone:FindFirstChildOfClass("Model"), selectedPlant.Name, stage, mutation)
+
+				local cost = clone.Settings.Cost
+				local occupied = clone.Settings.Occupied
+				local originalCost = clone.Settings.OriginalCost
+				local rarity = clone.Settings.Rarity
+				local income = clone.Settings.Income
+				local mutationValue = clone.Settings.Mutation
+				local displayName = clone.Settings.DisplayName
+
+				local billboard = clone:FindFirstChildOfClass("Model").PrimaryPart.Attachment:FindFirstChild("AnimalOverhead")
+
+				cost.Changed:Connect(function()
+					billboard.Price.Text = "$" .. formatNumber(cost.Value)
+				end)
+
+				originalCost.Value = selectedPlant.Price
+				cost.Value = selectedPlant.Price
+				income.Value = 1
+				rarity.Value = chosen
+				displayName.Value = selectedPlant.Name
+				mutationValue.Value = mutation
+				
+				local data = {
+					Mutation = mutation,
+					Name = selectedPlant.Name,
+					Stage = stage,
+					StagePercent = clone.Settings.StagePercentage.Value
+				}
+
+				if mutationValue.Value == "None" then
+					billboard.Mutation.Visible = false
+				else
+					billboard.Mutation.Visible = true
+					if ReplicatedStorage.MutationsGradients:FindFirstChild(mutationValue.Value) then
+						ReplicatedStorage.MutationsGradients:FindFirstChild(mutationValue.Value):Clone().Parent = billboard.Mutation
+					end
+				end
+
+				if gradients:FindFirstChild(chosen) then
+					gradients:FindFirstChild(chosen):Clone().Parent = billboard.Rarity
+				end
+
+				billboard.DisplayName.Text = selectedPlant.Name
+				billboard.Rarity.Text = selectedPlant.Rarity
+
+				local nmb2Stage = stagesModule.Utils.NumberToStage(stage)
+				local nmb2FancyStage = stagesModule.Utils.NumberToStage(stage, true)
+				local baseIncome = selectedPlant.Stages[nmb2Stage].Income or stage
+				income.Value = baseIncome
+				billboard.Generation.Text = "$" .. formatNumber(income.Value * mutations[mutation].Multiplier) .. "/s"
+
+				billboard.Stage.Text = nmb2FancyStage
+
+
+				local time = calculateTheTime(primary, workspace.Map.Road.End)
+
+				local currentTween -- to store current tween
+				local tweenConnection -- to disconnect tween event if needed
+
+				-- Start tween to the end of the conveyor
+				currentTween = tS:Create(primary, TweenInfo.new(time, Enum.EasingStyle.Linear), {
+					CFrame = workspace.Map.Road.End.CFrame
+				})
+				currentTween:Play()
+
+				-- Handle tween complete: remove drone if unclaimed
+				tweenConnection = currentTween.Completed:Connect(function(playbackState)
+					if playbackState == Enum.PlaybackState.Completed then
+						if not clone.Settings.Occupied.Value then
+							clone:Destroy()
+						end
+					end
+				end)
+
+				-- Handle player claiming or re-claiming the drone
+				primary.ProximityPrompt.Triggered:Connect(function(player)
+					local leaderstats = player:FindFirstChild("leaderstats")
+					if not leaderstats then return end
+
+					local coins = leaderstats:FindFirstChild("Coins")
+					if not coins then return end
+					
+					if player["Local Data"].Loaded == false then return end
+
+					local freeSpot = nil
+					local playersPlot = nil
+
+					local previousSpot = nil
+					for _, plot in pairs(workspace.Map.Plots:GetChildren()) do
+						if plot:GetAttribute("Owner") == player.UserId then
+							playersPlot = plot
+							freeSpot = locateEmptySlot(playersPlot)
+							break
+						end
+					end
+					if not playersPlot or not freeSpot then return end
+
+					local currentOwner = occupied.Value
+
+					-- Buying from no one
+					if not currentOwner then
+						if coins.Value < cost.Value then
+							return
+						end
+
+						coins.Value -= cost.Value
+						occupied.Value = player
+
+						cost.Value = math.ceil(cost.Value * 1.1)
+
+						if currentTween then currentTween:Cancel() end
+						if tweenConnection then tweenConnection:Disconnect() end
+
+						local timeToPlot = calculateTheTime(primary, playersPlot.DeliveryHitbox)
+						currentTween = tS:Create(primary, TweenInfo.new(timeToPlot, Enum.EasingStyle.Linear), {
+							CFrame = playersPlot.DeliveryHitbox.CFrame
+						})
+						currentTween:Play()
+						freeSpot:SetAttribute("Occupied", true)
+						reservedSpots[clone] = {
+							player = player,
+							slot = freeSpot
+						}
+
+
+						for t, p in pairs(game:GetService("Players"):GetChildren()) do
+							if p == player then
+								game.ReplicatedStorage.Remotes.DroneProx:FireClient(p, clone, false)
+							else
+								game.ReplicatedStorage.Remotes.DroneProx:FireClient(p, clone, true)
+							end
+						end
+
+
+						tweenConnection = currentTween.Completed:Connect(function(playbackState)
+							if playbackState == Enum.PlaybackState.Completed then
+								CropReplacer.CreateNewPot(player, playersPlot, data, freeSpot)
+								reservedSpots[clone] = nil
+								clone:Destroy()
+							end
+						end)
+
+					else
+						-- Prevent rebuying from self
+						if currentOwner == player then
+							return
+						end
+
+						-- Rebuying logic
+
+
+						if coins.Value < cost.Value then
+							return
+						end
+
+						coins.Value -= cost.Value
+						occupied.Value = player
+
+						cost.Value = math.ceil(cost.Value * 1.1)
+
+						if currentTween then currentTween:Cancel() end
+						if tweenConnection then tweenConnection:Disconnect() end
+
+						local timeToPlot = calculateTheTime(primary, playersPlot.DeliveryHitbox)
+						currentTween = tS:Create(primary, TweenInfo.new(timeToPlot, Enum.EasingStyle.Linear), {
+							CFrame = playersPlot.DeliveryHitbox.CFrame
+						})
+						currentTween:Play()
+						freeSpot:SetAttribute("Occupied", true)
+
+						local reserved = reservedSpots[clone]
+						if reserved and reserved.player ~= player then
+							reserved.slot:SetAttribute("Occupied", false)
+						end
+
+						freeSpot:SetAttribute("Occupied", true)
+						reservedSpots[clone] = {
+							player = player,
+							slot = freeSpot
+						}
+
+						for t, p in pairs(game:GetService("Players"):GetChildren()) do
+							if p == player then
+								game.ReplicatedStorage.Remotes.DroneProx:FireClient(p, clone, false)
+							else
+								game.ReplicatedStorage.Remotes.DroneProx:FireClient(p, clone, true)
+							end
+						end
+
+						tweenConnection = currentTween.Completed:Connect(function(playbackState)
+							if playbackState == Enum.PlaybackState.Completed then
+								CropReplacer.CreateNewPot(player, playersPlot, data, freeSpot)
+								reservedSpots[clone] = nil
+								clone:Destroy()
+							end
+						end)
+					end
+				end)
+			end
+		end
+	end
+end)
+
+
+local screen = workspace.Map.Map.Walls.Screen.Part
+
+-- function to handle spawning a guaranteed rarity plant
+task.spawn(function()
+	local timeToLegendary = SharedSetup.Legendary_Spawn_Time
+	local timeToMythical = SharedSetup.Mythic_Spawn_Time
+	local timeToRebirth = SharedSetup.Rebirth_Spawn_Time
+	
+	local legendaryText = screen.SurfaceGui.Legendary
+	local mythicalText = screen.SurfaceGui.Mythical
+	local rebirthText = screen.SurfaceGui.Rebirth
+	
+	local legendaryCounter = timeToLegendary
+	local rebirthCounter = timeToRebirth
+	local mythicalCounter = timeToMythical
+	
+	while wait(1) do
+		legendaryCounter -= 1
+		rebirthCounter -= 1
+		mythicalCounter -= 1
+		
+		rebirthText.Text = "Guaranteed Rebirth: <br/> " .. numberToTime(rebirthCounter)
+		legendaryText.Text = "Guaranteed Legendary: <br/> " .. numberToTime(legendaryCounter)
+		mythicalText.Text = "Guaranteed Mythical: <br/> " .. numberToTime(mythicalCounter)
+
+		if legendaryCounter == 0 then
+			legendaryCounter = timeToLegendary
+			
+			local selectedPlant = CropReplacer.selectPlantByRarity("Legendary")
+			local mutation = getRandomMutation()
+			
+			SpawnQueue.Add({
+				plant = selectedPlant,
+				rarity = "Legendary",
+				mutation = mutation,
+				stage = 0
+			})
+		end
+		
+		if rebirthCounter == 0 then
+			rebirthCounter = timeToRebirth
+
+			local selectedPlant = CropReplacer.selectPlantByRarity("Rebirth")
+			local mutation = getRandomMutation()
+
+			SpawnQueue.Add({
+				plant = selectedPlant,
+				rarity = "Rebirth",
+				mutation = mutation,
+				stage = 0
+			})
+		end
+		
+		if mythicalCounter == 0 then
+			mythicalCounter = timeToMythical
+
+			local selectedPlant = CropReplacer.selectPlantByRarity("Mythical")
+			local mutation = getRandomMutation()
+
+			SpawnQueue.Add({
+				plant = selectedPlant,
+				rarity = "Mythical",
+				mutation = mutation,
+				stage = 0
+			})
+		end
+	end
+end)
+
+--[[
+  ____      _     _      _   _       ____            _                 
+ |  _ \ ___| |__ (_)_ __| |_| |__   / ___| _   _ ___| |_ ___ _ __ ___  
+ | |_) / _ \ '_ \| | '__| __| '_ \  \___ \| | | / __| __/ _ \ '_ ` _ \ 
+ |  _ <  __/ |_) | | |  | |_| | | |  ___) | |_| \__ \ ||  __/ | | | | |
+ |_| \_\___|_.__/|_|_|   \__|_| |_| |____/ \__, |___/\__\___|_| |_| |_|
+                                           |___/                       
+]]--
+local function findPlayerBase(player)
+	local playerPlot = nil
+	for _, plot in pairs(plotsFolder:GetChildren()) do
+		if plot:GetAttribute("Owner") == player.UserId then
+			playerPlot = plot
+			break
+		end
+	end
+	return playerPlot
+end
+local function resetBase(player)
+	local playerPlot = findPlayerBase(player)
+	
+	if playerPlot then
+		for _, slot in pairs(playerPlot.PlantSlots:GetChildren()) do
+			slot.MoneyToClaim.Value = 0
+			slot.OfflineIncome.Value = 0
+			if slot:FindFirstChild("Pot") then
+				slot.Pot:Destroy()
+			end
+		end
+	end
+end
+local function calculateCost(player)
+	local leaderstats = player:WaitForChild("leaderstats")
+	local rebirths = leaderstats:WaitForChild("Rebirths")
+
+	local startcost = 10000000
+
+	return startcost + startcost*(rebirths.Value+1)/5
+end
+
+local function findARebirthPlant(plot)
+	local rebirthPlant = nil
+	for _, slot in pairs(plot.PlantSlots:GetChildren()) do
+		if slot:FindFirstChild("Pot") then
+			if slot:FindFirstChild("Pot"):WaitForChild("Settings"):WaitForChild("Rarity").Value == "Rebirth" and slot:FindFirstChild("Pot"):WaitForChild("Settings"):WaitForChild("Stage").Value == 5 then
+				rebirthPlant = slot
+				return rebirthPlant
+			end
+		end
+	end
+	return rebirthPlant
+end
+
+-- rebirth if player fills the requirements
+ReplicatedStorage.Remotes.Rebirth.OnServerEvent:Connect(function (player)
+	if player then
+		local leaderstats = player:WaitForChild("leaderstats")
+		local rebirths = leaderstats:WaitForChild("Rebirths")
+		local coins = leaderstats:WaitForChild("Coins")
+		
+		local cost = tonumber(calculateCost(player))
+		
+		local playerPlot = findPlayerBase(player)
+
+		if playerPlot then
+			local rebirthPlant = findARebirthPlant(playerPlot)
+			
+			if coins.Value >= cost and rebirthPlant then
+				resetBase(player)
+				rebirths.Value += 1
+				coins.Value = 2500
+			end
+		end
+	end
+end)
+
+--[[  
+  ____       _          __        ___               _   ____            _                 
+ |  _ \ _ __(_)_______  \ \      / / |__   ___  ___| | / ___| _   _ ___| |_ ___ _ __ ___  
+ | |_) | '__| |_  / _ \  \ \ /\ / /| '_ \ / _ \/ _ \ | \___ \| | | / __| __/ _ \ '_ ` _ \ 
+ |  __/| |  | |/ /  __/   \ V  V / | | | |  __/  __/ |  ___) | |_| \__ \ ||  __/ | | | | |
+ |_|   |_|  |_/___\___|    \_/\_/  |_| |_|\___|\___|_| |____/ \__, |___/\__\___|_| |_| |_|
+                                                              |___/                       
+]]
+
+local PrizeWheelSpin = ReplicatedStorage.Remotes:WaitForChild("PrizeWheelSpin")
+local ClaimFreeSpin = ReplicatedStorage.Remotes:WaitForChild("ClaimFreeSpin")
+
+local COOLDOWN_TIME = 5
+
+local spinCooldown = {}
+
+-- rewards
+local basePrizes = SharedSetup.Prize_Wheel_Prizes
+
+-- generate random prize for the player
+local function getPrizesForPlayer(player)
+	local prizes = table.clone(basePrizes)
+
+	local prizeWheel = player:FindFirstChild("PlayerData") and player.PlayerData:FindFirstChild("PrizeWheel")
+	if not prizeWheel then return prizes end
+
+	for _, prize in ipairs(prizes) do
+		if prize.Type == "Legendary" then
+			if os.time() - SharedSetup.Legendary_Luck_Boost_Time <= prizeWheel:FindFirstChild("Joined").Value then
+				prize.Chance = basePrizes[8].Chance * SharedSetup.Legendary_Luck_Boost_Multiplier
+			else
+				prize.Chance = basePrizes[8].Chance
+			end
+
+		end
+	end
+	
+	return prizes
+end
+
+
+-- random prize generator 3000
+local function getRandomPrize(prizes)
+	local totalWeight = 0
+	for _, prize in ipairs(prizes) do
+		totalWeight += prize.Chance
+	end
+
+	local roll, cumulative = math.random(totalWeight), 0
+	for _, prize in ipairs(prizes) do
+		cumulative += prize.Chance
+		if roll <= cumulative then
+			return prize
+		end
+	end
+end
+
+-- get a random angle
+local function getPrizeAngle(prize)
+	local min, max = table.unpack(prize.Range)
+	if min > max then min, max = max, min end
+	return math.random(min, max)
+end
+
+-- wheel spinning
+PrizeWheelSpin.OnServerEvent:Connect(function(player)
+	local now = os.clock()
+	if spinCooldown[player] and now - spinCooldown[player] < COOLDOWN_TIME then
+		return
+	end
+	spinCooldown[player] = now
+
+	local prizeWheel = player:FindFirstChild("PlayerData") and player.PlayerData:FindFirstChild("PrizeWheel")
+	if not prizeWheel then return end
+
+	-- check if player has any spins left
+	local spins = prizeWheel:FindFirstChild("Spins")
+	if not spins or spins.Value <= 0 then return end
+
+	spins.Value -= 1
+
+	local prizes = getPrizesForPlayer(player)
+	local prize = getRandomPrize(prizes)
+	local finalAngle = getPrizeAngle(prize)
+
+	local totalRotation = (360 * math.random(3, 6)) + finalAngle
+
+	PrizeWheelSpin:FireClient(player, prize, totalRotation)
+
+	task.delay(4, function()
+		if not player.Parent then return end 
+		
+		-- REWARDS
+		if prize.Type == "Coins" then
+			print("adding coins")
+			player.leaderstats.Coins.Value += prize.Amount
+		elseif prize.Type == "Tokens" then
+			player.PlayerData.Tokens.Value += prize.Amount
+		elseif prize.Type == "Rare" or prize.Type == "Epic" or prize.Type == "Legendary" then
+			local playersBase = findPlayerBase(player)
+
+			if playersBase then
+				local data = {
+					Mutation = CropReplacer.getRandomMutation(),
+					Name = CropReplacer.selectPlantByRarity(prize.Type).Name,
+					Stage = 0,
+					StagePercent = 0
+				}
+
+				CropReplacer.CreateNewPot(player, playersBase, data)
+			end
+		end
+	end)
+end)
+
+ClaimFreeSpin.OnServerEvent:Connect(function(player)
+	FreeSpinData(player)
+end)
+
+
+
+--[[
+  ____                 _               _             
+ |  _ \ _   _ _ __ ___| |__   __ _ ___(_)_ __   __ _ 
+ | |_) | | | | '__/ __| '_ \ / _` / __| | '_ \ / _` |
+ |  __/| |_| | | | (__| | | | (_| \__ \ | | | | (_| |
+ |_|    \__,_|_|  \___|_| |_|\__,_|___/_|_| |_|\__, |
+                                               |___/ 
+]]
+
+-- developer items purchases
+MarketplaceService.ProcessReceipt = function(receiptInfo)
+	for item, info in pairs(SharedInfo.PaidItems.DeveloperItems) do
+		if receiptInfo.ProductId == info.Id then
+			local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+
+			if player then
+				if info.Type == "Money" then
+					player.leaderstats.Coins.Value += info.Amount
+				elseif info.Type == "Tokens" then
+					player.PlayerData.Tokens.Value += info.Amount
+				elseif info.Type == "Spins" then
+					player.PlayerData.PrizeWheel.Spins.Value += info.Amount	
+				end
+			end
+
+			-- bardzo ważne: potwierdzamy, że zakup się udał!
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+	end
+
+	-- jeśli nic nie znaleziono, Roblox spróbuje jeszcze raz
+	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
+
+
+ReplicatedStorage.Remotes.PurchaseUpgrade.OnServerEvent:Connect(function(buyer, upgrade)
+	local playerData = buyer:WaitForChild("PlayerData")
+	local upgradeData = playerData:WaitForChild("Upgrades")
+	local upgrade = SharedInfo.PlayerData.PlayerData.Upgrades[upgrade]
+	local tokens = PlayerData:WaitForChild("Tokens")
+	
+	local upgradeValue = upgradeData:FindFirstChild(upgrade)
+	
+	if not upgradeValue or not upgrade then
+		return
+	end
+	
+end)
